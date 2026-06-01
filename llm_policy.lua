@@ -404,9 +404,62 @@ local function build_ctx(contract, now_ms)
     }
 end
 
--- Build the Policy for a contract from its resolved profile. Default selector is
--- deterministic argmax (subzero / converge); a profile may opt into seeded
--- divergence with selector = "softmax_sample" (greybox).
+-- Declarative spec -> verb compilers, so a config profile can express a full
+-- sentence (filter / mutate as data, not just weights). Named combinators only;
+-- the custom-fn escape hatches (F.where / R.custom / M.custom) need a
+-- programmatic Lua sentence (compose via the exposed M.dsl).
+local function map(fn, list)
+    local out = {}
+    for i, v in ipairs(list) do out[i] = fn(v) end
+    return out
+end
+
+local FILTER_NULLARY = {
+    requirements   = F.requirements,
+    not_disabled   = F.not_disabled,
+    breaker_closed = F.breaker_closed,
+    scope_matches  = F.scope_matches,
+}
+
+local function build_filter(spec)
+    if type(spec) == "string" then
+        local ctor = FILTER_NULLARY[spec]
+        if not ctor then error("llm_policy: unknown filter atom '" .. spec .. "'") end
+        return ctor()
+    end
+    if type(spec) == "table" then
+        if spec.all_of  then return F.all_of(map(build_filter, spec.all_of))  end
+        if spec.any_of  then return F.any_of(map(build_filter, spec.any_of))  end
+        if spec.none_of then return F.none_of(map(build_filter, spec.none_of)) end
+        if spec.tier_in then return F.tier_in(spec.tier_in) end
+        if #spec > 0    then return F.all_of(map(build_filter, spec)) end   -- bare list = all_of
+    end
+    error("llm_policy: invalid filter spec")
+end
+
+local function compile_filter(spec)
+    if spec == nil then return F.all_of{ F.requirements(), F.not_disabled() } end  -- default
+    return build_filter(spec)
+end
+
+local function build_mutate(spec)
+    if spec == nil or spec == "identity" then return mutate.identity end
+    if type(spec) == "table" then
+        if spec.pipe         then return mutate.pipe(map(build_mutate, spec.pipe)) end
+        if spec.filter_text  then return mutate.filter_text(spec.filter_text)  end
+        if spec.filter_image then return mutate.filter_image(spec.filter_image) end
+        if spec.jitter       then return mutate.jitter(spec.jitter)            end
+        if spec.set_param    then return mutate.set_param(spec.set_param)      end
+        if spec.clamp        then return mutate.clamp(spec.clamp)              end
+        if #spec > 0         then return mutate.pipe(map(build_mutate, spec))  end  -- bare list = pipe
+    end
+    error("llm_policy: invalid mutate spec")
+end
+
+-- Build the Policy for a contract from its resolved profile. A profile is a full
+-- declarative sentence: filter (default requirements+not_disabled), select
+-- (argmax / softmax_sample / chain over weights), mutate (default identity),
+-- sequence (retry_policy). For custom-fn verbs, compose a Policy via M.dsl.
 local function build_policy_for(profile, contract)
     local weights = merged_weights(profile, contract)
     local scorer  = R.weighted(weights)
@@ -423,9 +476,9 @@ local function build_policy_for(profile, contract)
     end
     local retry_table = (profile.retry_policy and CATALOG.retry[profile.retry_policy]) or {}
     return Policy.new{
-        filter   = F.all_of{ F.requirements(), F.not_disabled() },
+        filter   = compile_filter(profile.filter),
         select   = selector,
-        mutate   = mutate.identity,
+        mutate   = build_mutate(profile.mutate),
         sequence = retry_table,
     }
 end
@@ -848,6 +901,12 @@ end
 -- Test hooks (only exposed to make unit-testing pure helpers possible)
 -- These are intentionally underscored to signal "do not use in production code".
 -- ===========================================================================
+
+-- Public verb DSL — for hosts and Lua "sentence" files that compose a Policy
+-- directly (incl. the custom-fn escape hatches the declarative profile can't
+-- express). A config profile covers the named combinators; this exposes the raw
+-- verbs: `local dsl = require("llm_policy").dsl`.
+M.dsl = { filter = F, rank = R, mutate = mutate, sequence = sequence, policy = Policy }
 
 M._test = {
     validate_config        = validate_config,
