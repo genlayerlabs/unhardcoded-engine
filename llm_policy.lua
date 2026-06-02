@@ -440,6 +440,10 @@ local function build_filter(spec)
             local q = spec.quality_min
             return F.where(function(c) return (c.quality_hint or 0) >= q end)
         end
+        if spec.quality_max then
+            local q = spec.quality_max
+            return F.where(function(c) return (c.quality_hint or 0) < q end)
+        end
         if spec.price_max then
             local pin, pout = spec.price_max.input, spec.price_max.output
             return F.where(function(c)
