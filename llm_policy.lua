@@ -84,6 +84,8 @@ local R        = require("llm_policy.rank")
 local mutate   = require("llm_policy.mutate")
 local sequence = require("llm_policy.sequence")
 local Policy   = require("llm_policy.policy")
+local ir       = require("llm_policy.ir")
+local ELABORATE = ir.elaborate
 
 -- ===========================================================================
 -- Profile inheritance resolution
@@ -221,6 +223,23 @@ function M.init(config, metrics)
     CATALOG.profiles   = resolved_profiles
     CATALOG.retry      = config.retry_policies or {}
     CATALOG.candidates = build_candidate_matrix(config.providers, config.models)
+    -- Observation vocabulary for IR policies: core fields + config-declared
+    -- extensions (config.fields) + tier order (config.tier_order). Host-blessed
+    -- named Xforms (config.customs) resolve `custom(sym)` — never caller code.
+    CATALOG.field_schema = ir.fields.schema{
+        extensions = config.fields,
+        tier_order = config.tier_order,
+    }
+    CATALOG.customs = config.customs or {}
+    -- Host envelope: a Pred term ∧-ed onto every per-call policy_ir, so
+    -- callers can narrow the host's invariants but never widen them.
+    if config.policy_envelope ~= nil then
+        local sort, perr = ir.term.check(config.policy_envelope, CATALOG.field_schema)
+        if sort ~= "Pred" then
+            return false, "config.policy_envelope must be a Pred term: " .. tostring(perr or sort)
+        end
+    end
+    CATALOG.envelope = config.policy_envelope
 
     -- Reset runtime, then seed from metrics
     RUNTIME.circuit_breakers   = {}
@@ -481,33 +500,68 @@ local function build_mutate(spec)
     error("llm_policy: invalid mutate spec")
 end
 
--- Build the Policy for a contract from its resolved profile. A profile is a full
--- declarative sentence: filter (default requirements+not_disabled), select
--- (argmax / softmax_sample / chain over weights), mutate (default identity),
--- sequence (retry_policy). For custom-fn verbs, compose a Policy via M.dsl.
-local function build_policy_for(profile, contract)
-    local weights = merged_weights(profile, contract)
-    local scorer  = R.weighted(weights)
-    local selector
-    if type(profile.select) == "function" then
-        selector = profile.select              -- explicit R.* sentence (argmax/chain/softmax/custom)
-    elseif profile.selector == "softmax_sample" then
-        selector = R.softmax_sample(scorer, profile.selector_opts)
-    elseif profile.selector == "chain" then
-        -- greybox: deterministic priority chain. The chain may be supplied
-        -- per-call (contract.chain — e.g. resolved by the genvm host from
-        -- select_providers_for) or fixed in the profile.
-        selector = R.chain(contract.chain or profile.chain or {})
-    else
-        selector = R.argmax(scorer)
+-- Does a declarative spec smuggle a Lua closure anywhere? Closures are the
+-- local escape hatch: they cannot be lowered to IR (no term, no hash), so a
+-- profile containing one takes the legacy compile path below.
+local function spec_has_fn(spec)
+    if type(spec) == "function" then return true end
+    if type(spec) == "table" then
+        for _, v in pairs(spec) do
+            if spec_has_fn(v) then return true end
+        end
     end
-    local retry_table = (profile.retry_policy and CATALOG.retry[profile.retry_policy]) or {}
-    return Policy.new{
-        filter   = compile_filter(profile.filter),
-        select   = selector,
-        mutate   = build_mutate(profile.mutate),
-        sequence = retry_table,
-    }
+    return false
+end
+
+-- Build the Policy for a contract. ONE language: every policy is a Σ_pol term
+-- (admission = check -> normalize -> eval; see docs/SIGMA-POL.md), arriving
+-- either ready-made (contract.policy_ir — per-call data, host envelope
+-- applied — or profile.policy_ir) or by lowering the declarative profile
+-- through llm_policy.elaborate. The only exception: profiles carrying Lua
+-- closures (custom-fn verbs) compile legacy-style and are unhashable —
+-- local-only, never admissible over the wire.
+local function build_policy_for(profile, contract)
+    local ir_term
+    if contract.policy_ir ~= nil then
+        ir_term = contract.policy_ir
+        if CATALOG.envelope ~= nil then
+            ir_term = ir.constrain(ir_term, CATALOG.envelope)
+        end
+    elseif profile.policy_ir ~= nil then
+        ir_term = profile.policy_ir            -- operator's own; no envelope
+    elseif spec_has_fn(profile.filter) or spec_has_fn(profile.mutate)
+        or type(profile.select) == "function" then
+        -- legacy escape hatch: closures can't be terms
+        local weights = merged_weights(profile, contract)
+        local scorer  = R.weighted(weights)
+        local selector
+        if type(profile.select) == "function" then
+            selector = profile.select          -- explicit R.* sentence
+        elseif profile.selector == "softmax_sample" then
+            selector = R.softmax_sample(scorer, profile.selector_opts)
+        elseif profile.selector == "chain" then
+            selector = R.chain(contract.chain or profile.chain or {})
+        else
+            selector = R.argmax(scorer)
+        end
+        local retry_table = (profile.retry_policy and CATALOG.retry[profile.retry_policy]) or {}
+        return Policy.new{
+            filter   = compile_filter(profile.filter),
+            select   = selector,
+            mutate   = build_mutate(profile.mutate),
+            sequence = retry_table,
+        }
+    else
+        ir_term = ELABORATE.profile(profile, {
+            weights     = merged_weights(profile, contract),
+            retry_table = (profile.retry_policy and CATALOG.retry[profile.retry_policy]) or {},
+            contract    = contract,
+        })
+    end
+    return ir.compile(ir_term, {
+        schema  = CATALOG.field_schema,
+        customs = CATALOG.customs,
+    })
 end
 
 -- Filters see raw candidates (pol.plan), but prices live in the metrics
@@ -531,7 +585,11 @@ local function resolve_plan(contract, now_ms)
     local profile_name = contract.profile or "default"
     local profile = CATALOG.profiles[profile_name]
     if profile == nil then
-        return nil, "unknown profile: " .. tostring(profile_name), {}, nil, nil
+        if contract.policy_ir ~= nil then
+            profile = {}   -- a per-call IR policy is a complete sentence; no profile needed
+        else
+            return nil, "unknown profile: " .. tostring(profile_name), {}, nil, nil
+        end
     end
 
     local ctx = build_ctx(contract, now_ms)
@@ -717,6 +775,8 @@ local function new_run_state(contract)
         rejected      = rejected or {},
         decision_path = {},
         started_at_ms = started_at,
+        -- IR policies carry their identity; legacy closure profiles have none
+        policy_fingerprint = pol and pol.fingerprint or nil,
     }
     if #ranked == 0 then
         state.trace.total_latency_ms = clock() - started_at
@@ -818,7 +878,9 @@ local function handle_response(state, response)
     local error_kind = response.error_kind or "unknown"
     state.last_error_kind = error_kind
 
-    local action = classify_action(state.profile, error_kind)
+    -- The failure plan travels with the Policy (legacy build assigns the
+    -- profile's retry table to pol.sequence; IR policies carry their FailPlan).
+    local action = sequence.classify(state.policy and state.policy.sequence or {}, error_kind)
     local act    = action.action or "next_candidate"
 
     update_breaker_on_failure(cand.provider_id, clock(), action.open_breaker_ms)
@@ -958,6 +1020,11 @@ end
 -- express). A config profile covers the named combinators; this exposes the raw
 -- verbs: `local dsl = require("llm_policy").dsl`.
 M.dsl = { filter = F, rank = R, mutate = mutate, sequence = sequence, policy = Policy }
+
+-- The Σ_pol IR: signature, terms (check/normalize/encode), field schema,
+-- interpreter, and legacy-surface elaboration. `M.ir.compile(term)` is the
+-- admission pipeline for policies that arrive as data (e.g. with the call).
+M.ir = ir
 
 M._test = {
     validate_config        = validate_config,

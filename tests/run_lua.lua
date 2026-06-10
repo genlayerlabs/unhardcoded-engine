@@ -14,6 +14,10 @@ local files = {
     "tests/unit/parity.lua",
     "tests/unit/declarative_policy.lua",
     "tests/unit/price_enrichment.lua",
+    "tests/unit/ir_term.lua",
+    "tests/unit/ir_interp.lua",
+    "tests/unit/ir_elaborate.lua",
+    "tests/unit/ir_golden.lua",
 }
 
 for _, f in ipairs(files) do

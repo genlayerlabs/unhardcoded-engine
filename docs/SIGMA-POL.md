@@ -1,0 +1,278 @@
+# Σ_pol — the policy IR
+
+Normative spec for `sigma-pol/v1`: the term language policies are written in,
+its canonical encoding, and the reference semantics. A policy in this form is
+**data** — serializable, hashable, admissible from untrusted callers — and any
+conforming interpreter, in any language, computes the same decision from it.
+
+The mathematical development (multi-sorted signature, term algebra,
+initiality) lives outside this repo; this document pins the engineering
+choices that make the uniqueness theorem actually hold. The reference
+implementation is `llm_policy/sig.lua` (signature), `term.lua` (admission,
+normal form, encoding), `fields.lua` (observation vocabulary), `interp.lua`
+(reference interpreter 𝔖).
+
+## 1. What is fixed, and where
+
+The uniqueness of the interpreter is relative to four commitments. Each lives
+in exactly one place:
+
+1. **The signature Σ_pol** — the closed set of operations (`sig.lua`). Any
+   change is a version bump of the `sigma-pol/v1` tag.
+2. **The observation vocabulary** — the named fields through which a policy
+   sees a candidate (`fields.lua`): sort, source, and **default when absent**.
+   The candidate's representation is each host's business; the observation map
+   is the contract. Hosts/configs may *declare* additional fields
+   (`config.fields`); terms observing undeclared fields are rejected at
+   admission.
+3. **The numeric model 𝕍** — v1 pins IEEE-754 double, with deterministic
+   evaluation order (AC children are evaluated in normal-form order), and the
+   semantics use **only correctly-rounded operations** (+, −, ×, ÷,
+   comparisons): no transcendentals anywhere in 𝔖, so conforming hosts agree
+   bit-for-bit regardless of their libm (this is why `sample` is
+   rank-geometric, §5.3, not a softmax). Fixed-point arithmetic is a future
+   version bump, not a config knob.
+4. **The environment** — the PRNG (`util.lcg`, MINSTD, part of this spec),
+   and the `custom(sym)` registry (`config.customs`): host-blessed named
+   transforms. A term references them by name; it can never inject behavior.
+
+## 2. Terms
+
+A term is a plain array: `{ op, arg1, ..., argn }`. Whether a position holds a
+subterm or a parameter is decided by the signature, never by inspecting the
+value. JSON arrays map 1:1 (`["cmp","price_out","le",25]`).
+
+Sorts: `Pred`, `Scorer`, `Selector`, `Xform`, `FailPlan`, `Evidence`,
+`Policy` (operational — subterm positions); parameters are scalars or flat
+records (`Num`, `Rel`, `NumField`, `BoolField`, `Tier`, `Capability`,
+`ParamName`, `Scalar`, `Sym`, `Provenance`, `FailReason`, `Action`, `Recipe`,
+`Chain`). See `sig.lua` for the full operation table.
+
+An `Action` record has a closed verb (`action`, optional `then_action` ∈
+`sequence.ACTIONS`) and typed core keys (`attempts`, `backoff_ms` —
+number or array, `open_breaker_ms`); any further key is a host-interpreted
+knob and must map to a finite number.
+
+A complete policy:
+
+```lua
+{ "policy",
+  { "ev_zero" },                                          -- Evidence (reserved)
+  { "and", { "meets_req" },                               -- Pred
+           { "not", { "is", "breaker_open" } },
+           { "cmp", "price_out", "le", 25 } },
+  { "add", { "scale", 0.7, { "cost" } },                  -- Scorer
+           { "scale", 0.3, { "quality" } } },
+  { "argmax" },                                           -- Selector
+  { "seq", { "filter_text", { "NFKC" } },                 -- Xform
+           { "clamp_param", "temperature", 0, 1 } },
+  { "override", { "always", { action = "next_candidate" } },  -- FailPlan
+    "auth_error", { action = "disable_provider" } },
+}
+```
+
+Admission (`term.check`) is total and runs before anything executes: arity,
+sorts, parameter validity, field declarations, and **resource bounds** —
+depth ≤ 64, nodes ≤ 4096 (`term.LIMITS`, part of the spec) — so a hostile
+term is rejected before recursion can exhaust the validator. Terms are finite
+trees; evaluation cost is O(|term|); there is no symbol for I/O, loops, or
+effects.
+
+## 3. Observation vocabulary (core)
+
+| field | sort | source | default |
+|---|---|---|---|
+| `price_in`, `price_out` | Num | state EMA, else catalog | **+inf** |
+| `quality` | Num | state `last_quality_eval`, else `quality_hint` | 0 |
+| `quality_hint` | Num | catalog | 0 |
+| `latency_ms` | Num | state EMA | **+inf** |
+| `tok_s` | Num | state EMA | 0 |
+| `success_rate` | Num | state EMA | 1 |
+| `credits` | Num | state | 0 |
+| `context` | Num | catalog capabilities | 0 |
+| `has_tee`, `no_log` | Bool | catalog | false |
+| `breaker_open`, `disabled` | Bool | state | false |
+
+Defaults are conservative by design: a candidate with no declared price does
+**not** pass a price ceiling (the legacy declarative gate read missing as 0;
+the IR pins the strict reading). Tier order defaults to
+`fallback < marketplace < partner` and is declarable (`config.tier_order`).
+
+## 4. Normal form and identity
+
+`term.normalize` applies the v1 equations: AC ops (`and`, `or`, `add`,
+`ev_add`) flatten, drop units, collapse on absorbing elements, and sort
+children by canonical encoding; `seq` flattens and drops `id` (order kept);
+`not` is involutive; `scale(1)` is identity, `scale(0)` annihilates;
+`gate(top,·)` is identity, `gate(bot,·)` and `gate(·,zero)` annihilate;
+`normalize` is idempotent; a `FailPlan` collapses to `always(base)` plus
+overrides sorted by reason (outer wins, redundant dropped).
+
+The normalizer performs **no arithmetic in 𝕍**: nested scales stay nested
+(`scale(a, scale(b, s))` is already canonical) and identities use only exact
+comparisons against 0 and 1. The normal form — and therefore the hash — is
+independent of the numeric model; moving 𝕍 to fixed-point changes decisions,
+not identities.
+
+`term.encode(normalize(t))` is the canonical, version-prefixed string.
+**Policy identity = sha256 of that string**, computed host-side (the core
+stays dependency-free). `term.fingerprint` is only a cache key.
+
+## 5. Reference semantics (𝔖)
+
+`interp.eval(term, alg)` is the fold; `interp.default_algebra(opts)` is 𝔖,
+built over the existing pure verbs. Carriers:
+
+| sort | carrier |
+|---|---|
+| Pred | `fn(cand, ctx) -> true \| (false, reason)` |
+| Scorer | `fn(pop, ctx) -> { score... }` — population-relative (`normalize` requires it) |
+| Selector | `fn(scored, ctx) -> ordered scored` — returns the full ordering (the failover sequence consumes it); seed enters here |
+| Xform | `fn(req, cand, ctx) -> req'` |
+| FailPlan | retry table `{ [reason] = Action }`, base under `unknown` |
+| Evidence | `fn(cand, ctx) -> Num` — provisional; `from_prov("self")` reads own quality state |
+| Policy | the engine's Policy object |
+
+Scorers may return a second value (per-candidate named-atom breakdowns); it
+feeds traces and is **not** part of the normative semantics.
+
+Two deliberate differences from the legacy verbs:
+
+- IR selectors do **not** silently zero breaker-open candidates inside the
+  selector; demotion is written in the policy itself with
+  `gate(not(is("breaker_open")), scorer)` — demote to score 0, keep as last
+  resort — or exclusion with the same Pred in the filter. The algebra hides
+  nothing (the legacy lowering states the gate explicitly).
+- `jitter` salts its PRNG substream **per parameter name**, so two jittered
+  parameters draw from independent, deterministic streams (the legacy
+  map-based jitter drew sequentially in `pairs()` order, which is not
+  specified across implementations).
+
+### 5.1 `meets_req` — exact semantics
+
+`meets_req` checks the whole `ctx.request.requirements` block against the
+candidate. It is deliberately the one coarse primitive (the caller's
+requirement vocabulary evolves without signature changes), so its semantics
+are pinned **exhaustively** here; reference: `filter.lua F.requirements()`.
+In evaluation order — the first failure is the rejection reason:
+
+1. **Derived needs.** `needs` = the set in `requirements.needs`, plus
+   `vision` if `request.images` is a non-empty list, plus `tools` if
+   `request.tools` is a non-empty list, plus `json_mode` if
+   `request.response_format.type == "json_object"`. For each need with a
+   capability mapping (`tools→supports_tools`, `vision→supports_vision`,
+   `json_mode→supports_json_mode`, `seed→supports_seed`), the candidate's
+   capability flag must be truthy → else `missing_capability:<need>`.
+   Needs without a mapping are ignored.
+2. `min_context`: `capabilities.context` (default 0) `< min_context` →
+   `min_context`.
+3. `model_family`: candidate's family differs → `model_family`.
+4. `tier`: candidate's tier differs → `tier`.
+5. `privacy == "tee_required"`: candidate lacks `has_tee` → `tee_required`.
+6. `privacy == "no_log"`: candidate has neither `no_log` nor `has_tee` →
+   `no_log`.
+7. `min_quality`: `quality_hint` (default 0 — the **static** hint, not the
+   composed `quality` field) `< min_quality` → `min_quality`.
+8. `min_tok_s`: the state EMA `ema_tok_s` is absent **or** `< min_tok_s` →
+   `min_tok_s` (no observation fails closed).
+
+### 5.2 Named scorers — exact semantics
+
+Each named scorer is the pointwise lift of a pinned formula (reference:
+`rank.lua`); `m` is the state EMA entry for (provider, family); all results
+clamp to [0,1] where noted. The request-side knobs (`max_latency_ms`,
+`max_cost_usd`, `estimated_*_tokens`) live in `ctx.request.requirements`
+with the defaults below — they are part of this spec, not implementation
+detail:
+
+| scorer | formula |
+|---|---|
+| `quality` | clamp(`m.last_quality_eval`, else `quality_hint`, else **0.5**) |
+| `speed` | `m.ema_latency_ms` absent → **0.5**; else clamp(1 − latency/`max_latency_ms` (default **5000**)) |
+| `cost` | cost_usd = (`m.price_in`·`estimated_input_tokens` (default **1000**) + `m.price_out`·`estimated_output_tokens` (default **500**))/10⁶, missing prices read **0**; cost ≤ 0 → **1.0**; else clamp(1 − cost/`max_cost_usd` (default **0.01**)) |
+| `free_credit` | `state.credits[provider]` ≥ `state.free_credit_threshold_usd` (default **1.0**) → 1.0 else 0.0 |
+| `partner` | tier map: partner **1.0**, marketplace **0.5**, fallback/other **0.0** |
+
+Note the asymmetry, kept deliberately for v1: `cost` reads **only** the EMA
+(missing → 0 → score 1.0, "free until observed"), while the `price_in`/
+`price_out` **fields** default to +inf (missing fails a ceiling). Heuristic
+scoring is optimistic; admission gates are conservative. Use `cmp` ceilings,
+not the `cost` scorer, to enforce spend limits.
+
+### 5.3 `sample` — exact semantics
+
+`sample(temp)` is **rank-geometric**, not a softmax: `exp()` is a libm
+transcendental, unspecified by IEEE-754, and a last-ulp disagreement between
+two hosts' libms could flip a sampled pick — unacceptable for reproducible
+greybox divergence. The pinned algorithm uses only correctly-rounded ops:
+
+1. Order candidates by (score descending, input order on ties) — exactly the
+   `argmax` ordering.
+2. Let `t = max(temp, 0)` and `q = t / (t + 1)`. Assign weights by **initial
+   rank**: `w₁ = 1`, `wᵢ₊₁ = wᵢ · q` (iterated multiplication, never `pow`).
+3. Sample without replacement, proportional to the fixed initial weights:
+   repeatedly draw `r = rng() · Σw` over the remaining pool (summed in pool
+   order), pick the first candidate whose cumulative weight reaches `r`,
+   remove it. `rng` is the pinned LCG seeded with `ctx.seed or 0`.
+
+Weights depend on ranks only, not score gaps (scale-invariant — score units
+are arbitrary anyway). `temp = 0` reproduces the argmax order exactly;
+`temp → ∞` approaches uniform. The legacy closure-path `R.softmax_sample`
+keeps the old exp-based behavior and is local-only, like everything on that
+path.
+
+## 6. Using it
+
+```lua
+local router = require("llm_policy")
+
+-- per-call: the policy arrives with the contract, as data
+router.execute({ prompt = "...", policy_ir = <term> })
+
+-- pinned in a profile
+profiles.edge = { policy_ir = <term> }
+
+-- programmatic
+local pol = router.ir.compile(<term>, { schema = ..., customs = ... })
+```
+
+Admission pipeline: `check → normalize → eval`. The compiled policy carries
+`.term` (normal form) and `.fingerprint` (also surfaced as
+`trace.policy_fingerprint`); hosts should cache compiled policies by identity
+hash.
+
+**There is one policy language.** Declarative profiles are lowered through
+`llm_policy.elaborate` and compile as IR — every profile gets a canonical
+form and an identity. The single exception is a profile carrying Lua
+closures (custom-fn verbs): it compiles legacy-style, has no hash
+(`policy_fingerprint = nil`), and is local-only — never admissible over the
+wire. The lowering states what the legacy selectors did silently: the scorer
+is wrapped in `gate(not(is("breaker_open")), ·)`.
+
+**Host envelope.** `config.policy_envelope` is a Pred term (checked at init)
+that the router ∧-s onto every per-call `policy_ir` via
+`ir.constrain(policy_term, envelope_pred)`: callers can narrow the host's
+invariants, never widen them. Composition is the algebra's `∧`, not a
+mechanism:
+
+```lua
+policy_envelope = { "and", { "min_tier", "marketplace" },
+                           { "cmp", "price_out", "le", 50 } }
+```
+
+## 7. Conformance
+
+Initiality reduces conformance to a finite checklist: two implementations that
+agree on every operation of Σ_pol (and share the vocabulary, 𝕍, PRNG, and
+encoding above) agree on every term, by structural induction. The unit tests
+in `tests/unit/ir_*.lua` are organized per-operation for exactly this reason;
+a host porting the interpreter ports the checklist.
+
+The executable half is **`tests/golden/sigma_pol_v1.json`**: language-neutral
+vectors covering canonical encodings (including float formatting and AC
+sorting), fingerprints, Pred verdicts with reasons, full policy decisions
+(ordered/scores/rejected), seeded sampling, seeded Xforms, FailPlan
+classification, and Evidence. A conforming host replays the file and must
+reproduce everything bit-for-bit (scores within 1e-12). Reference runner:
+`tests/unit/ir_golden.lua`; regenerate only on intentional, version-bumped
+changes with `tests/golden/gen_vectors.lua`.

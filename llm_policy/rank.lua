@@ -158,6 +158,10 @@ end
 -- Seeded stochastic ordering: sample without replacement with probability
 -- proportional to exp(score/temp). seed=nil collapses toward argmax-ish but is
 -- still seeded by 0; greybox passes ctx.seed = H(tx_id, node_addr).
+-- LEGACY (closure-path only): math.exp is a libm transcendental, NOT pinned
+-- by IEEE-754, so this can differ across hosts in the last ulp and flip a
+-- pick. The IR `sample` op (llm_policy.interp) is the deterministic,
+-- transcendental-free replacement; declarative profiles lower to it.
 function R.softmax_sample(scorer, opts)
     local temp = (opts and opts.temp) or 1.0
     return function(candidates, ctx)

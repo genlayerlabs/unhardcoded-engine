@@ -46,8 +46,9 @@ local function show(label, contract)
         print(string.format(
             "  #%d  %-10s %-20s  score=%.3f  (Q=%.2f S=%.2f C=%.2f F=%.0f P=%.1f)%s",
             i, r.candidate.provider_id, r.candidate.model_family,
-            r.score, b.quality, b.speed, b.cost, b.free_credit, b.partner,
-            b.breaker_open and "  [BREAKER OPEN]" or ""
+            r.score, b.quality or 0, b.speed or 0, b.cost or 0,
+            b.free_credit or 0, b.partner or 0,
+            (b.gated or b.breaker_open) and "  [BREAKER OPEN]" or ""
         ))
     end
     if #ranked == 0 and #rejected > 0 then

@@ -63,12 +63,15 @@ The core never references a host — hosts import the core.
 llm_policy.lua             -- package entry (init / execute / execute_step / rank / …)
 llm_policy/
   filter.lua  rank.lua  mutate.lua  sequence.lua  policy.lua   -- the algebra
+  sig.lua  term.lua  fields.lua  interp.lua  elaborate.lua  ir.lua
+                                                               -- the Σ_pol IR (policies as data)
   candidate.lua  util.lua                                      -- object + helpers
 router.lua                 -- compat shim: return require("llm_policy")
 config.example.lua         -- example catalog + profiles (schema illustration)
 metrics.example.lua        -- example metrics seed
 docs/
   POLICY_DESIGN.md         -- the candidate object + the policy algebra
+  SIGMA-POL.md             -- the policy IR: terms, encoding, hashing, reference semantics
   GENVM-LLM-POLICY.md      -- using llm_policy as a node's greyboxing algebra
 example_host/              -- the minimal embedding reference (~80 lines, mock provider)
 tests/                     -- Lua unit tests (run_lua.lua, unit/, smoke_rank.lua)

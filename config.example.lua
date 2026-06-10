@@ -224,7 +224,8 @@ return {
     -- ============================================================
     retry_policies = {
         balanced = {
-            ok                  = { action = "terminal" },
+            -- success needs no entry: the engine returns on response.ok; only
+            -- error kinds are classified, over the closed sequence.ACTIONS set.
             rate_limit          = { action = "next_candidate", open_breaker_ms = 30000 },
             timeout             = { action = "next_candidate" },
             server_error        = { action = "retry_same", attempts = 1, backoff_ms = 500, then_action = "next_candidate" },
