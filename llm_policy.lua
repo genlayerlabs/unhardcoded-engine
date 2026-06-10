@@ -333,6 +333,8 @@ local function gather_marketplace_candidates(now_ms)
                         served_model_id = offer.model_family,
                         capabilities    = offer.capabilities or {},
                         quality_hint    = offer.quality_hint,
+                        price_in        = offer.price_in_usd_per_mtok,
+                        price_out       = offer.price_out_usd_per_mtok,
                         tier            = p.tier or "marketplace",
                         has_tee         = p.has_tee or false,
                         no_log          = p.no_log or false,
@@ -448,8 +450,10 @@ local function build_filter(spec)
         if spec.price_max then
             local pin, pout = spec.price_max.input, spec.price_max.output
             return F.where(function(c)
-                return (pin  == nil or (c.price_in  or 0) <= pin)
-                   and (pout == nil or (c.price_out or 0) <= pout)
+                local ok = (pin  == nil or (c.price_in  or 0) <= pin)
+                       and (pout == nil or (c.price_out or 0) <= pout)
+                if ok then return true end
+                return false, "price_max"
             end)
         end
         if #spec > 0    then return F.all_of(map(build_filter, spec)) end   -- bare list = all_of
@@ -506,6 +510,21 @@ local function build_policy_for(profile, contract)
     }
 end
 
+-- Filters see raw candidates (pol.plan), but prices live in the metrics
+-- store — so price ceilings were no-ops on static candidates. Enrich at
+-- plan time: fill nil price fields from ema_metrics (marketplace
+-- candidates already carry their offer's prices, which win).
+local function enrich_with_prices(c)
+    if c.price_in ~= nil and c.price_out ~= nil then return c end
+    local m = RUNTIME.ema_metrics[pm_key(c.provider_id, c.model_family)]
+    if not m or (m.price_in == nil and m.price_out == nil) then return c end
+    local e = {}
+    for k, v in pairs(c) do e[k] = v end
+    if e.price_in  == nil then e.price_in  = m.price_in  end
+    if e.price_out == nil then e.price_out = m.price_out end
+    return e
+end
+
 -- Resolve the plan for a contract. Returns ordered, err, rejected, policy, ctx;
 -- the engine keeps policy+ctx for per-attempt mutation. M.rank uses the first 3.
 local function resolve_plan(contract, now_ms)
@@ -519,10 +538,10 @@ local function resolve_plan(contract, now_ms)
     local pol = build_policy_for(profile, contract)
 
     local pool = {}
-    for _, c in ipairs(CATALOG.candidates) do pool[#pool + 1] = c end
-    for _, c in ipairs(gather_marketplace_candidates(now_ms)) do pool[#pool + 1] = c end
+    for _, c in ipairs(CATALOG.candidates) do pool[#pool + 1] = enrich_with_prices(c) end
+    for _, c in ipairs(gather_marketplace_candidates(now_ms)) do pool[#pool + 1] = enrich_with_prices(c) end
     if type(contract.extra_candidates) == "table" then   -- ephemeral per-call (e.g. per-agent)
-        for _, c in ipairs(contract.extra_candidates) do pool[#pool + 1] = c end
+        for _, c in ipairs(contract.extra_candidates) do pool[#pool + 1] = enrich_with_prices(c) end
     end
 
     -- Pin short-circuits filtering (the pinned candidate is still scored).
