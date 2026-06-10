@@ -291,6 +291,131 @@ function M.restore_state(snapshot)
     return true, nil
 end
 
+-- Read-only, live provider-side health snapshot for the dashboard/ingress.
+-- STRICTLY non-mutating: unlike circuit_breaker_state/disabled_provider_state
+-- (which auto-reset RUNTIME as a side effect), this replicates their recovery
+-- math locally and never touches RUNTIME. Walks breakers, disables, EMA metrics
+-- and the static CATALOG roster, grouped by provider.
+function M.provider_status(now_ms)
+    now_ms = now_ms or clock()
+    local providers = {}
+
+    local function ensure(pid)
+        local p = providers[pid]
+        if p == nil then
+            p = {
+                available = true,
+                breaker   = { open = false, consecutive_failures = 0,
+                              opened_at_ms = nil, ms_until_recovery = 0 },
+                disabled  = nil,
+                credits_remaining_usd = nil,
+                models    = {},
+            }
+            providers[pid] = p
+        end
+        return p
+    end
+
+    -- Seed the full roster from the static catalog so every configured provider
+    -- is listed even with no breaker/EMA yet (available=true, empty models).
+    if CATALOG.providers then
+        for pid, _ in pairs(CATALOG.providers) do ensure(pid) end
+    end
+
+    -- Breakers: replicate circuit_breaker_state's recovery math (window =
+    -- DEFAULTS.circuit_breaker_rate_limit_ms) WITHOUT mutating RUNTIME.
+    local cb_window = DEFAULTS.circuit_breaker_rate_limit_ms
+    for pid, b in pairs(RUNTIME.circuit_breakers or {}) do
+        local p = ensure(pid)
+        local cf = b.consecutive_failures or 0
+        if b.open then
+            local opened = b.opened_at_ms or 0
+            local since = now_ms - opened
+            if since >= cb_window then
+                -- auto-recovered (we do NOT reset RUNTIME)
+                p.breaker.open = false
+                p.breaker.consecutive_failures = cf
+                p.breaker.opened_at_ms = opened
+                p.breaker.ms_until_recovery = 0
+            else
+                p.breaker.open = true
+                p.breaker.consecutive_failures = cf
+                p.breaker.opened_at_ms = opened
+                p.breaker.ms_until_recovery = math.max(0, opened + cb_window - now_ms)
+            end
+        else
+            p.breaker.open = false
+            p.breaker.consecutive_failures = cf
+            p.breaker.opened_at_ms = b.opened_at_ms
+            p.breaker.ms_until_recovery = 0
+        end
+    end
+
+    -- Disables: replicate disabled_provider_state's TTL math without mutating.
+    -- Legacy string entries have an unknown at_ms → treat as 0 (expiring/expired).
+    local dis_ttl = DEFAULTS.disable_provider_ttl_ms
+    for pid, d in pairs(RUNTIME.disabled_providers or {}) do
+        local p = ensure(pid)
+        local kind, at_ms
+        if type(d) == "table" then
+            kind  = d.kind
+            at_ms = d.at_ms or 0
+        else
+            kind  = tostring(d)
+            at_ms = 0
+        end
+        local since = now_ms - at_ms
+        if since < dis_ttl then
+            p.disabled = {
+                kind  = kind,
+                at_ms = at_ms,
+                ms_until_recovery = math.max(0, at_ms + dis_ttl - now_ms),
+            }
+        end
+        -- else: TTL-expired → leave disabled=nil (provider available again)
+    end
+
+    -- EMA metrics: per-model success-rate / latency / pricing, plus credits.
+    for key, m in pairs(RUNTIME.ema_metrics or {}) do
+        local credit_pid = string.match(key, "^__credits|(.+)$")
+        if credit_pid then
+            local p = ensure(credit_pid)
+            -- seed_runtime_from_metrics writes free_credits_remaining_usd; accept
+            -- credits_remaining_usd too in case the writer is updated.
+            p.credits_remaining_usd = m.free_credits_remaining_usd
+                                       or m.credits_remaining_usd
+        else
+            -- pm_key joins provider_id.."|"..model_family; provider_ids carry no
+            -- "|", so the first "|" splits cleanly.
+            local bar = string.find(key, "|", 1, true)
+            if bar then
+                local pid    = string.sub(key, 1, bar - 1)
+                local family = string.sub(key, bar + 1)
+                local p = ensure(pid)
+                p.models[family] = {
+                    success_rate     = m.success_rate_ewma,
+                    avg_latency_ms   = m.ema_latency_ms,
+                    observations     = m.n or 0,
+                    price_in         = m.price_in,
+                    price_out        = m.price_out,
+                    last_quality_eval = m.last_quality_eval,
+                }
+            end
+        end
+    end
+
+    -- Final availability: not auth-disabled AND breaker not open (post-recovery).
+    for _, p in pairs(providers) do
+        p.available = (p.disabled == nil) and (not p.breaker.open)
+    end
+
+    return {
+        schema          = "router_provider_status",
+        generated_at_ms = now_ms,
+        providers       = providers,
+    }
+end
+
 function M.update_metrics(provider_id, model_family, delta)
     local k = pm_key(provider_id, model_family)
     local cur = RUNTIME.ema_metrics[k] or { n = 0 }
