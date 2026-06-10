@@ -807,6 +807,10 @@ local function handle_response(state, response)
                 provider_id     = cand.provider_id,
                 model_family    = cand.model_family,
                 served_model_id = cand.served_model_id,
+                -- the prices this candidate was ranked with, so the caller
+                -- can stamp an executed cost on the request record
+                price_in        = cand.price_in,
+                price_out       = cand.price_out,
             },
         })
     end

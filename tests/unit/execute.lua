@@ -314,3 +314,13 @@ t.test("contract.messages overrides contract.prompt in the built request", funct
     t.eq(#captured.messages, 2, "messages array passed through verbatim")
     t.eq(captured.messages[1].role, "system")
 end)
+
+t.test("chosen carries the prices the candidate was ranked with", function()
+    reset()
+    router.update_metrics("p1", "m1", { price_in = 2.5, price_out = 10.0 })
+    mock_host({ p1 = { { ok = true, response = { text = "hi" } } } })
+    local res = router.execute({ prompt = "hi", profile = "default" })
+    t.truthy(res.ok, "ok=true")
+    t.eq(res.chosen.price_in, 2.5, "price_in from metrics enrichment")
+    t.eq(res.chosen.price_out, 10.0, "price_out from metrics enrichment")
+end)
