@@ -161,6 +161,31 @@ t.test("bad_request aborts immediately, no fallback", function()
     t.falsy(res.ok, "abort means ok=false")
     t.contains(res.error, "bad_request")
     t.eq(#log, 1, "only p1 was called")
+    t.truthy(r.runtime().circuit_breakers.p1 == nil,
+             "a client-fault error is not breaker evidence against p1")
+end)
+
+t.test("client-fault kinds never open breakers (3 malformed requests ≠ provider down)", function()
+    reset()
+    -- Pre-fix, every cascading failure incremented consecutive_failures, so
+    -- three of the CALLER's own malformed requests hit the threshold (3),
+    -- opened p1's breaker, and the next valid request lost its best provider.
+    mock_host({
+        p1 = { { ok = false, error_kind = "bad_request",     http_status = 400 },
+               { ok = false, error_kind = "bad_request",     http_status = 400 },
+               { ok = false, error_kind = "bad_request",     http_status = 400 },
+               { ok = true,  response = { text = "still here" } } },
+    })
+    for _ = 1, 3 do
+        router.execute({ prompt = "malformed", profile = "default" })
+    end
+    local b = r.runtime().circuit_breakers.p1
+    t.truthy(b == nil or (not b.open and (b.consecutive_failures or 0) == 0),
+             "no breaker evidence accumulated from client faults")
+
+    local res = router.execute({ prompt = "valid", profile = "default" })
+    t.truthy(res.ok, "valid request succeeds")
+    t.eq(res.chosen.provider_id, "p1", "p1 was never penalized for the caller's faults")
 end)
 
 t.test("exhausted candidates surface exhausted error", function()

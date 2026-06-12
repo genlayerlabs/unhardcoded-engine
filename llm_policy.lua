@@ -652,6 +652,18 @@ local function build_request(cand, contract)
     return req
 end
 
+-- Error kinds attributable to the CLIENT's request (malformed body, filtered
+-- content, oversized context) say nothing about provider health, so they must
+-- not count toward the circuit breaker — otherwise a burst of malformed
+-- requests opens every breaker in the catalog and the next valid request gets
+-- no_candidates. Provider-fault kinds (timeout, server_error, network_error,
+-- rate_limit, auth_error, bad_response, unknown) keep counting.
+local CLIENT_FAULT_KINDS = {
+    bad_request      = true,
+    content_filter   = true,
+    context_overflow = true,
+}
+
 local function update_breaker_on_failure(provider_id, now_ms, open_breaker_ms)
     local b = RUNTIME.circuit_breakers[provider_id]
             or { open = false, consecutive_failures = 0 }
@@ -866,7 +878,9 @@ local function handle_response(state, response)
     local action = sequence.classify(state.policy and state.policy.sequence or {}, error_kind)
     local act    = action.action or "next_candidate"
 
-    update_breaker_on_failure(cand.provider_id, clock(), action.open_breaker_ms)
+    if not CLIENT_FAULT_KINDS[error_kind] then
+        update_breaker_on_failure(cand.provider_id, clock(), action.open_breaker_ms)
+    end
 
     if act == "abort" then
         state.trace.total_latency_ms = clock() - state.started_at
