@@ -127,7 +127,7 @@ t.test("auth_error disables provider and advances", function()
     step = router.execute_step(step.state_handle, nil, { ok = false, error_kind = "auth_error" })
     t.eq(step.status, "call")
     t.eq(step.request.provider_id, "p2", "skipped the disabled provider")
-    t.eq(r.runtime().disabled_providers.p1, "auth_error")
+    t.eq(r.runtime().disabled_providers.p1.kind, "auth_error")
 end)
 
 t.test("exhausting all candidates yields a done step with 'exhausted'", function()

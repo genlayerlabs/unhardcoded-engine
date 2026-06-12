@@ -145,8 +145,10 @@ t.test("auth_error disables the provider for the rest of the loop", function()
     local res = router.execute({ prompt = "hi", profile = "default" })
     t.truthy(res.ok)
     t.eq(res.chosen.provider_id, "p2")
-    t.eq(r.runtime().disabled_providers.p1, "auth_error",
+    t.eq(r.runtime().disabled_providers.p1.kind, "auth_error",
          "p1 marked disabled with the error_kind as reason")
+    t.truthy(r.runtime().disabled_providers.p1.at_ms ~= nil,
+             "disable is timestamped so it can TTL-expire")
 end)
 
 t.test("bad_request aborts immediately, no fallback", function()

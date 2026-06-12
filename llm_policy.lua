@@ -37,7 +37,7 @@ local CATALOG = {
 local RUNTIME = {
     circuit_breakers   = {},  -- [provider_id] = { open, opened_at_ms, consecutive_failures }
     ema_metrics        = {},  -- [provider_id .. "|" .. model_family] = { ema_latency_ms, success_rate_ewma, n }
-    disabled_providers = {},  -- [provider_id] = reason_string
+    disabled_providers = {},  -- [provider_id] = { kind = error_kind, at_ms } (legacy: reason_string)
     discovery_cache    = {},  -- [discovery_id] = { offers, fetched_at_ms }
     initialized        = false,
 }
@@ -47,6 +47,7 @@ local DEFAULTS = {
     circuit_breaker_threshold       = 3,
     circuit_breaker_rate_limit_ms   = 30 * 1000,
     circuit_breaker_failure_ms      = 5 * 60 * 1000,
+    disable_provider_ttl_ms         = 5 * 60 * 1000,
     discovery_cache_ttl_ms          = 60 * 1000,
     ema_alpha                       = 0.2,
     free_credit_threshold_usd       = 1.0,
@@ -68,6 +69,10 @@ local function host_log(level, event, fields)
     if host and host.log then
         host.log(level, event, fields or {})
     end
+end
+
+local function clock()
+    return (host and host.now_ms and host.now_ms()) or 0
 end
 
 -- ===========================================================================
@@ -293,6 +298,14 @@ function M.restore_state(snapshot)
             RUNTIME[k] = deep_copy(v)
         end
     end
+    -- Back-compat: old snapshots stored disabled_providers as plain reason
+    -- strings (permanent until restart). Upgrade them to the TTL-bearing
+    -- { kind, at_ms } shape so they expire after a full TTL from now.
+    for pid, d in pairs(RUNTIME.disabled_providers or {}) do
+        if type(d) ~= "table" then
+            RUNTIME.disabled_providers[pid] = { kind = tostring(d), at_ms = clock() }
+        end
+    end
     return true, nil
 end
 
@@ -389,6 +402,27 @@ local function circuit_breaker_state(provider_id, now_ms)
     return true
 end
 
+-- Disabled-provider check with TTL expiry. Entries are { kind, at_ms } and
+-- auto-recover after DEFAULTS.disable_provider_ttl_ms, so one transient
+-- auth_error cannot keep a provider disabled until process restart. Legacy
+-- string entries (pre-TTL snapshots, injected state) are upgraded in place
+-- with at_ms = now so they expire after a full TTL.
+local function disabled_provider_state(provider_id, now_ms)
+    local d = RUNTIME.disabled_providers[provider_id]
+    if d == nil then return false end
+    if type(d) ~= "table" then
+        d = { kind = tostring(d), at_ms = now_ms }
+        RUNTIME.disabled_providers[provider_id] = d
+    end
+    local since = now_ms - (d.at_ms or 0)
+    if since >= DEFAULTS.disable_provider_ttl_ms then
+        -- disable auto-expires
+        RUNTIME.disabled_providers[provider_id] = nil
+        return false
+    end
+    return true
+end
+
 local function merged_weights(profile, contract)
     local w = shallow_copy(profile.weights or {})
     local ov = contract.weights_override
@@ -406,6 +440,14 @@ local function build_ctx(contract, now_ms)
     for pid, _ in pairs(RUNTIME.circuit_breakers) do
         breakers[pid] = circuit_breaker_state(pid, now_ms)
     end
+    -- Snapshot only LIVE disables: TTL expiry happens here (engine side), so
+    -- the pure verbs keep their simple "present = disabled" view.
+    local disabled = {}
+    for pid, _ in pairs(RUNTIME.disabled_providers) do
+        if disabled_provider_state(pid, now_ms) then
+            disabled[pid] = RUNTIME.disabled_providers[pid]
+        end
+    end
     local credits = {}
     for k, slot in pairs(RUNTIME.ema_metrics) do
         local pid = string.match(k, "^__credits|(.+)$")
@@ -416,7 +458,7 @@ local function build_ctx(contract, now_ms)
         state = {
             ema      = RUNTIME.ema_metrics,
             breakers = breakers,
-            disabled = RUNTIME.disabled_providers,
+            disabled = disabled,
             credits  = credits,
             free_credit_threshold_usd = DEFAULTS.free_credit_threshold_usd,
         },
@@ -683,10 +725,6 @@ end
 -- over the same machine; async hosts drive it without blocking the Lua VM.
 -- See docs/POLICY_DESIGN.md §6 for the step protocol (Model B, yield-on-IO).
 
-local function clock()
-    return (host and host.now_ms and host.now_ms()) or 0
-end
-
 -- Build the initial machine state from a contract. On a ranking error or an
 -- empty candidate set, `state.done` is set to the terminal result.
 local function new_run_state(contract)
@@ -741,7 +779,7 @@ local function advance(state)
     local ranked = state.ranked
     while state.cursor <= #ranked do
         local cand = ranked[state.cursor].candidate
-        if RUNTIME.disabled_providers[cand.provider_id] then
+        if disabled_provider_state(cand.provider_id, clock()) then
             state.trace.decision_path[#state.trace.decision_path + 1] = {
                 event        = "skipped",
                 provider_id  = cand.provider_id,
@@ -835,7 +873,9 @@ local function handle_response(state, response)
         return finish(state, { ok = false, error = error_kind, trace = state.trace })
 
     elseif act == "disable_provider" then
-        RUNTIME.disabled_providers[cand.provider_id] = error_kind
+        -- TTL'd, not permanent: expires after DEFAULTS.disable_provider_ttl_ms
+        -- (see disabled_provider_state) so a transient auth_error self-heals.
+        RUNTIME.disabled_providers[cand.provider_id] = { kind = error_kind, at_ms = clock() }
         state.trace.decision_path[#state.trace.decision_path + 1] = {
             event       = "provider_disabled",
             provider_id = cand.provider_id,

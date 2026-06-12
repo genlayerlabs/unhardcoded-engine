@@ -81,7 +81,10 @@ end
 
 function F.not_disabled()
     return function(cand, ctx)
-        if (ctx.state.disabled or {})[cand.provider_id] then
+        -- ctx.state.disabled values are { kind, at_ms } tables (the engine
+        -- snapshots only non-expired entries); legacy hosts may still pass
+        -- plain reason strings. Either way: present = disabled.
+        if (ctx.state.disabled or {})[cand.provider_id] ~= nil then
             return false, "disabled_provider"
         end
         return true
