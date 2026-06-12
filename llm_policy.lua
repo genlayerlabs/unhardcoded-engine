@@ -467,6 +467,86 @@ local function disabled_provider_state(provider_id, now_ms)
     return true
 end
 
+-- Read-only, live provider-side health snapshot for the host's dashboard.
+-- STRICTLY non-mutating: consumes breaker_view/disable_view — the same
+-- recovery math the engine's checks apply — without their side effects, so
+-- a dashboard poll never resets a breaker or clears a disable. Walks
+-- breakers, disables, EMA metrics and the static CATALOG roster.
+function M.provider_status(now_ms)
+    now_ms = now_ms or clock()
+    local providers = {}
+
+    local function ensure(pid)
+        local p = providers[pid]
+        if p == nil then
+            p = {
+                available = true,
+                breaker   = breaker_view(nil, now_ms),
+                disabled  = nil,
+                credits_remaining_usd = nil,
+                models    = {},
+            }
+            providers[pid] = p
+        end
+        return p
+    end
+
+    -- Seed the full roster from the static catalog so every configured
+    -- provider is listed even with no breaker/EMA yet (available, empty).
+    if CATALOG.providers then
+        for pid in pairs(CATALOG.providers) do ensure(pid) end
+    end
+
+    for pid, b in pairs(RUNTIME.circuit_breakers or {}) do
+        local v = breaker_view(b, now_ms)
+        v.recovered = nil  -- wrapper-internal marker, not part of the schema
+        ensure(pid).breaker = v
+    end
+
+    for pid, d in pairs(RUNTIME.disabled_providers or {}) do
+        ensure(pid).disabled = disable_view(d, now_ms)
+    end
+
+    -- EMA metrics: per-model success-rate / latency / pricing, plus credits.
+    for key, m in pairs(RUNTIME.ema_metrics or {}) do
+        local credit_pid = string.match(key, "^__credits|(.+)$")
+        if credit_pid then
+            local p = ensure(credit_pid)
+            -- seed writes free_credits_remaining_usd; accept the plain name
+            -- too in case the writer is updated.
+            p.credits_remaining_usd = m.free_credits_remaining_usd
+                                       or m.credits_remaining_usd
+        else
+            -- pm_key joins provider_id.."|"..model_family; provider ids carry
+            -- no "|", so the first "|" splits cleanly.
+            local bar = string.find(key, "|", 1, true)
+            if bar then
+                local pid    = string.sub(key, 1, bar - 1)
+                local family = string.sub(key, bar + 1)
+                ensure(pid).models[family] = {
+                    success_rate      = m.success_rate_ewma,
+                    avg_latency_ms    = m.ema_latency_ms,
+                    observations      = m.n or 0,
+                    price_in          = m.price_in,
+                    price_out         = m.price_out,
+                    last_quality_eval = m.last_quality_eval,
+                }
+            end
+        end
+    end
+
+    -- Final availability: not auth-disabled AND breaker not open.
+    for _, p in pairs(providers) do
+        p.available = (p.disabled == nil) and (not p.breaker.open)
+    end
+
+    return {
+        schema          = "router_provider_status",
+        generated_at_ms = now_ms,
+        providers       = providers,
+    }
+end
+
 local function merged_weights(profile, contract)
     local w = shallow_copy(profile.weights or {})
     local ov = contract.weights_override
