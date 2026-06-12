@@ -118,6 +118,30 @@ not identities.
 **Policy identity = sha256 of that string**, computed host-side (the core
 stays dependency-free). `term.fingerprint` is only a cache key.
 
+### 4.1 Numeric encoding grammar (normative)
+
+The rendering of a number parameter is part of the encoding spec, NOT an
+implementation detail — two conforming hosts must render every admitted
+number to identical bytes, regardless of language or libc:
+
+- `-0` encodes as `0`.
+- An integral value with `|v| ≤ 2^53` encodes in fixed notation, no
+  fractional part, no exponent (`5`, not `5.0` or `5e0`); a leading `-`
+  for negatives.
+- Any other value encodes as C99 `%.17g` **with the exponent constrained
+  to the form** `e±dd…` — lowercase `e`, sign always present, at least
+  two digits zero-padded to two, more only when the exponent needs them
+  (`1.0000000000000001e-05`, `2.5000000000000002e-10`, `1e+100`; never
+  `e-5`, `e-010`, or `E-05`). Hosts whose printf pads to three digits
+  (pre-C99 MSVC runtimes) must normalize; hosts without C formatting
+  must reproduce these exact bytes.
+- NaN and ±infinity are not representable: admission (`check`) rejects
+  them before encoding is reached.
+
+The golden vectors include exponent-form numbers; a host that delegates
+rendering to a non-conforming printf will fail conformance replay rather
+than silently fork the identity space.
+
 ## 5. Reference semantics (𝔖)
 
 `interp.eval(term, alg)` is the fold; `interp.default_algebra(opts)` is 𝔖,

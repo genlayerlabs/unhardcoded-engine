@@ -61,6 +61,16 @@ add{ name = "encoding-ac-sorting", kind = "encoding",
 add{ name = "encoding-number-format", kind = "encoding",
      term = { "and", { "cmp", "quality_hint", "ge", 0.1 }, { "cmp", "context", "ge", 4000 } } }
 
+-- 2b. exponent-form numbers: the spec's §4.1 grammar (e±dd, C99 two-digit
+-- minimum). A host whose printf pads exponents to three digits (or renders
+-- shortest-round-trip instead of %.17g) forks the identity space — this
+-- vector makes that a conformance failure instead of a silent divergence.
+add{ name = "encoding-number-exponent-form", kind = "encoding",
+     term = { "and",
+         { "cmp", "quality_hint", "ge", 1e-05 },
+         { "cmp", "price_out",    "le", 2.5e-10 },
+         { "cmp", "context",      "le", 1e+100 } } }
+
 -- 3. FailPlan normal form: outer override wins, reasons sorted, redundant dropped
 add{ name = "encoding-failplan-canonical", kind = "encoding",
      term = { "override",
