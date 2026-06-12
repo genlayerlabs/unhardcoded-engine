@@ -180,6 +180,8 @@ local function seed_runtime_from_metrics(metrics)
                 success_rate_ewma = mm.success_rate_24h or 1.0,
                 price_in          = mm.price_in_usd_per_mtok,
                 price_out         = mm.price_out_usd_per_mtok,
+                -- without this, R.quality always fell back to the static hint
+                last_quality_eval = mm.last_quality_eval,
                 n                 = 0,  -- bench observations don't count as live observations
             }
             ::continue::
