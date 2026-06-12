@@ -151,3 +151,20 @@ t.test("encode: canonical, versioned, param tables key-sorted", function()
          T.encode({ "cmp", "price_in", "le", 5.0 }),
         "5 and 5.0 encode identically")
 end)
+
+t.test("check: chain entries are closed records (identity stays injective)", function()
+    -- An extra key — worst case an array part — would make param_enc treat
+    -- the entry as an array and DROP provider/model: two chains that select
+    -- different providers would share one canonical encoding, hence one
+    -- sha256 identity. Admission must reject what encoding cannot represent
+    -- injectively.
+    local sort, err = T.check({ "chain", { { provider = "p1", model = "m1" } } })
+    t.eq(sort, "Selector", "clean chain admits: " .. tostring(err))
+
+    sort, err = T.check({ "chain", { { provider = "p1", model = "m1", "smuggled" } } })
+    t.falsy(sort, "array part in a chain entry is rejected")
+    t.contains(err, "unknown key")
+
+    sort, err = T.check({ "chain", { { provider = "p1", model = "m1", note = "x" } } })
+    t.falsy(sort, "extra record key in a chain entry is rejected")
+end)

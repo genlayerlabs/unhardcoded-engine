@@ -101,6 +101,10 @@ local function check_recipe(v)
     return nil
 end
 
+local CHAIN_KEYS = {
+    provider = true, provider_id = true, model = true, model_family = true,
+}
+
 local function check_chain(v)
     if type(v) ~= "table" then return "Chain must be an array" end
     for i, e in ipairs(v) do
@@ -108,6 +112,15 @@ local function check_chain(v)
            or type(e.provider or e.provider_id) ~= "string"
            or type(e.model or e.model_family) ~= "string" then
             return "Chain[" .. i .. "] must be { provider=, model= }"
+        end
+        -- Closed record. An extra key — worse, an array part — would make
+        -- param_enc treat the entry as an array and DROP provider/model:
+        -- two different admitted chains, one canonical encoding. Identity
+        -- must stay injective over everything check admits.
+        for k in pairs(e) do
+            if not CHAIN_KEYS[k] then
+                return "Chain[" .. i .. "]: unknown key '" .. tostring(k) .. "'"
+            end
         end
     end
     return nil
