@@ -139,6 +139,14 @@ add{ name = "policy-normalize", kind = "policy",
          { "always", { action = "next_candidate" } } },
      candidates = POP, ctx = { request = { requirements = {} }, now_ms = 0 } }
 
+-- 8b. Policy decision: top_k shortlists to k after the inner selector orders
+add{ name = "policy-top-k", kind = "policy",
+     term = { "policy",
+         { "ev_zero" }, { "top" }, { "field", "quality_hint" },
+         { "top_k", 2, { "argmax" } }, { "id" },
+         { "always", { action = "next_candidate" } } },
+     candidates = POP, ctx = { request = { requirements = {} }, now_ms = 0 } }
+
 -- 9. Xform: params, seed injection, clamping, per-param seeded jitter, directive
 add{ name = "xform-seq-seeded", kind = "xform",
      term = { "seq",

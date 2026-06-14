@@ -372,6 +372,21 @@ function I.default_algebra(opts)
             return out
         end
     end
+    -- top_k: order by the inner selector, then keep only the first k. The
+    -- shortlist IS the failover sequence, so this bounds how many candidates
+    -- the engine may try ("the 3 fastest", "the 5 best on benchmarks").
+    alg.top_k = function(a)
+        local k, inner = a[1], a[2]
+        return function(scored, ctx)
+            local ordered = inner(scored, ctx)
+            local out = {}
+            for i = 1, #ordered do
+                if i > k then break end
+                out[i] = ordered[i]
+            end
+            return out
+        end
+    end
 
     -- ---- Xform ----------------------------------------------------------
     alg.id  = function() return Mut.identity end

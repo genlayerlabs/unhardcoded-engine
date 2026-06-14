@@ -75,6 +75,22 @@ t.test("check: family_eq admits a family name; or-composes into a set", function
     t.falsy(sort); t.contains(err, "string (Family)")
 end)
 
+t.test("check: top_k wraps an inner selector with a numeric k", function()
+    t.eq(T.check({ "top_k", 3, { "argmax" } }), "Selector", "top_k(k, argmax) admits")
+    t.eq(T.check({ "top_k", 5, { "sample", 0.5 } }), "Selector", "top_k over sample admits")
+    local s1, e1 = T.check({ "top_k", 3 })                     -- missing inner selector
+    t.falsy(s1); t.contains(e1, "argument")
+    local s2, e2 = T.check({ "top_k", { "argmax" }, 3 })       -- args swapped: Count position gets a term
+    t.falsy(s2)
+    -- k is a Count (positive integer): a fractional/zero/negative k would make
+    -- "the first k" implementation-defined across hosts, so admission rejects it.
+    local s3, e3 = T.check({ "top_k", 2.5, { "argmax" } })
+    t.falsy(s3); t.contains(e3, "Count")
+    t.falsy(T.check({ "top_k", 0, { "argmax" } }), "k=0 is rejected")
+    t.falsy(T.check({ "top_k", -1, { "argmax" } }), "negative k is rejected")
+    t.eq(T.check({ "top_k", 2.0, { "argmax" } }), "Selector", "an integer-valued float admits")
+end)
+
 t.test("normalize: AC flatten + sort makes order irrelevant", function()
     local a = { "cmp", "price_in", "le", 5 }
     local b = { "is", "has_tee" }

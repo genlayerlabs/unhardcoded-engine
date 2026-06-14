@@ -30,6 +30,7 @@ S.OP_SORTS = {
 
 -- Parameter sorts and how to validate their values (see llm_policy.term):
 --   Num        finite number
+--   Count      positive integer (>= 1); a bounded count, e.g. top_k's k
 --   Rel        "lt"|"le"|"eq"|"ne"|"ge"|"gt"
 --   NumField   declared field of sort Num (schema-checked)
 --   BoolField  declared field of sort Bool (schema-checked)
@@ -84,6 +85,7 @@ S.ops = {
     ordered       = { out = "Selector", ins = {} },          -- keep input order
     sample        = { out = "Selector", ins = { "Num" } },   -- rank-geometric, temp (transcendental-free)
     chain         = { out = "Selector", ins = { "Chain" } }, -- greybox priority whitelist
+    top_k         = { out = "Selector", ins = { "Count", "Selector" } }, -- order by inner, keep first k (k >= 1)
 
     -- Xform — monoid of request transforms -------------------------------
     id            = { out = "Xform", ins = {} },
