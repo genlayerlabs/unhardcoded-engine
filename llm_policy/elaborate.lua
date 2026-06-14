@@ -60,6 +60,11 @@ function E.filter(spec)
             for _, t in ipairs(spec.tier_in) do out[#out + 1] = { "tier_eq", t } end
             return #out == 2 and out[2] or out
         end
+        if spec.family_in then
+            local out = { "or" }
+            for _, f in ipairs(spec.family_in) do out[#out + 1] = { "family_eq", f } end
+            return #out == 2 and out[2] or out
+        end
         if spec.quality_min then return { "cmp", "quality_hint", "ge", spec.quality_min } end
         if spec.quality_max then return { "cmp", "quality_hint", "lt", spec.quality_max } end
         if spec.price_max then

@@ -18,6 +18,11 @@ t.test("filter atoms lower to field observations", function()
          enc({ "and", { "cmp", "price_in", "le", 5 }, { "cmp", "price_out", "le", 25 } }))
     t.eq(enc(E.filter({ tier_in = { "partner", "tee" } })),
          enc({ "or", { "tier_eq", "partner" }, { "tier_eq", "tee" } }))
+    t.eq(enc(E.filter({ family_in = { "gpt-5.5", "claude-opus-4-8" } })),
+         enc({ "or", { "family_eq", "gpt-5.5" }, { "family_eq", "claude-opus-4-8" } }),
+        "family_in lowers to or(family_eq), like tier_in")
+    t.eq(enc(E.filter({ family_in = { "gpt-5.5" } })), enc({ "family_eq", "gpt-5.5" }),
+        "singleton family_in collapses to a single family_eq")
     t.eq(enc(E.filter({ "requirements", { tier_in = { "partner" } } })),
          enc({ "and", { "meets_req" }, { "tier_eq", "partner" } }),
         "bare list = all_of; singleton tier_in collapses")

@@ -21,6 +21,9 @@ t.test("check: a well-formed policy term has sort Policy", function()
     t.eq(sort, "Policy")
 end)
 
+-- unknown-op rejection is also the forward-compat guarantee of the
+-- append-only signature (SIGMA-POL §1.1): an old host fails closed on a newer
+-- op, it never silently diverges.
 t.test("check: rejects unknown ops, bad arity, bad params", function()
     local sort, err = T.check({ "frobnicate" })
     t.falsy(sort); t.contains(err, "unknown op")
@@ -62,6 +65,14 @@ t.test("check: schema extensions admit declared fields only", function()
     local s2, err = T.check({ "cmp", "region_score", "gt", 0.5 })
     t.falsy(s2, "default schema does not know it")
     t.contains(err, "undeclared field")
+end)
+
+t.test("check: family_eq admits a family name; or-composes into a set", function()
+    t.eq(T.check({ "family_eq", "gpt-5.5" }), "Pred", "a family name admits")
+    t.eq(T.check({ "or", { "family_eq", "gpt-5.5" }, { "family_eq", "claude-opus-4-8" } }),
+         "Pred", "or of family_eq is the family-set filter")
+    local sort, err = T.check({ "family_eq", 5 })             -- non-string family
+    t.falsy(sort); t.contains(err, "string (Family)")
 end)
 
 t.test("normalize: AC flatten + sort makes order irrelevant", function()

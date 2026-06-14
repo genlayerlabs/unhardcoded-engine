@@ -17,8 +17,16 @@ normal form, encoding), `fields.lua` (observation vocabulary), `interp.lua`
 The uniqueness of the interpreter is relative to four commitments. Each lives
 in exactly one place:
 
-1. **The signature Σ_pol** — the closed set of operations (`sig.lua`). Any
-   change is a version bump of the `sigma-pol/v1` tag.
+1. **The signature Σ_pol** — the operation set (`sig.lua`), **append-only
+   within a major version**. *Adding* an operation (with its sorts) keeps the
+   `sigma-pol/v1` tag: every existing term re-encodes byte-for-byte (the new
+   op appears in none of them, and the version prefix is unchanged), and a
+   host that predates the op rejects it at admission (`unknown op`, §7) rather
+   than diverging — so no committed identity rotates and no decision forks.
+   *Removing or retyping* an operation, or changing the encoding/normal form
+   (§4), is a **major bump** (`sigma-pol/v1` → `/v2`): it rotates the tag and,
+   with it, every identity. The operations never grow per-field — data
+   extensibility lives in the observation vocabulary (item 2).
 2. **The observation vocabulary** — the named fields through which a policy
    sees a candidate (`fields.lua`): sort, source, and **default when absent**.
    The candidate's representation is each host's business; the observation map
@@ -44,7 +52,7 @@ value. JSON arrays map 1:1 (`["cmp","price_out","le",25]`).
 
 Sorts: `Pred`, `Scorer`, `Selector`, `Xform`, `FailPlan`, `Evidence`,
 `Policy` (operational — subterm positions); parameters are scalars or flat
-records (`Num`, `Rel`, `NumField`, `BoolField`, `Tier`, `Capability`,
+records (`Num`, `Rel`, `NumField`, `BoolField`, `Tier`, `Family`, `Capability`,
 `ParamName`, `Scalar`, `Sym`, `Provenance`, `FailReason`, `Action`, `Recipe`,
 `Chain`). See `sig.lua` for the full operation table.
 
@@ -97,6 +105,14 @@ Defaults are conservative by design: a candidate with no declared price does
 **not** pass a price ceiling (the legacy declarative gate read missing as 0;
 the IR pins the strict reading). Tier order defaults to
 `fallback < marketplace < partner` and is declarable (`config.tier_order`).
+
+The categorical candidate attributes `tier` (`tier_eq`, `min_tier`) and
+`model_family` (`family_eq`) are observed directly off the candidate, not
+through the Num/Bool field schema — they carry no numeric default and need no
+declaration. `family_eq` is the single-family identity test; a *set* of
+families is the algebra's `or` of `family_eq` (the `family_in` surface sugar
+lowers to exactly that), so "the cheapest among {A, B, C}" is
+`or(family_eq A, family_eq B, family_eq C)` as the filter with a `cost` scorer.
 
 ## 4. Normal form and identity
 
@@ -290,7 +306,11 @@ Initiality reduces conformance to a finite checklist: two implementations that
 agree on every operation of Σ_pol (and share the vocabulary, 𝕍, PRNG, and
 encoding above) agree on every term, by structural induction. The unit tests
 in `tests/unit/ir_*.lua` are organized per-operation for exactly this reason;
-a host porting the interpreter ports the checklist.
+a host porting the interpreter ports the checklist. A host implementing a
+*subset* of the op set is conforming on that subset: by append-only (§1.1)
+the only cross-host disagreement an extension can introduce is a term using an
+op the host lacks, which it rejects at admission (`unknown op`) — a refusal,
+never a divergent decision.
 
 The executable half is **`tests/golden/sigma_pol_v1.json`**: language-neutral
 vectors covering canonical encodings (including float formatting and AC
@@ -298,5 +318,7 @@ sorting), fingerprints, Pred verdicts with reasons, full policy decisions
 (ordered/scores/rejected), seeded sampling, seeded Xforms, FailPlan
 classification, and Evidence. A conforming host replays the file and must
 reproduce everything bit-for-bit (scores within 1e-12). Reference runner:
-`tests/unit/ir_golden.lua`; regenerate only on intentional, version-bumped
-changes with `tests/golden/gen_vectors.lua`.
+`tests/unit/ir_golden.lua`. Regenerating with `tests/golden/gen_vectors.lua`
+must be **additive** outside a major bump: an append-only signature change
+adds vectors for the new op and leaves every existing vector byte-stable;
+editing an existing encoding is a §4 change and therefore a major bump.

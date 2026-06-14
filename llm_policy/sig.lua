@@ -7,11 +7,15 @@
 -- constants, so normalization (llm_policy.term) is signature-driven rather
 -- than op-by-op code.
 --
--- The signature is CLOSED and versioned: adding, removing, or retyping a
--- symbol is a version bump (see docs/SIGMA-POL.md). Data extensibility lives
--- in the field schema (llm_policy.fields) — candidates may carry any declared
--- field; the operations never grow per-field. Terms over this signature are
--- the IR: plain arrays { op, arg1, ..., argn }, serializable, hashable, and
+-- The signature is versioned and APPEND-ONLY within a major version (see
+-- docs/SIGMA-POL.md §1.1): adding a symbol keeps the sigma-pol/v1 tag —
+-- existing terms stay byte-identical and a host predating the op rejects it
+-- at admission (unknown op) rather than diverging. Removing or retyping a
+-- symbol, or changing the encoding/normal form, is a major bump that rotates
+-- the tag and every identity. Data extensibility still lives in the field
+-- schema (llm_policy.fields) — candidates may carry any declared field; the
+-- operations never grow per-field. Terms over this signature are the IR:
+-- plain arrays { op, arg1, ..., argn }, serializable, hashable, and
 -- interpretable by any conforming host (llm_policy.interp is the reference).
 
 local S = {}
@@ -30,6 +34,7 @@ S.OP_SORTS = {
 --   NumField   declared field of sort Num (schema-checked)
 --   BoolField  declared field of sort Bool (schema-checked)
 --   Tier       tier name present in the schema's tier order
+--   Family     model-family name (open namespace, string)
 --   Capability capability name (open namespace, string)
 --   ParamName  request parameter name (string)
 --   Scalar     number | string | boolean
@@ -55,6 +60,7 @@ S.ops = {
     cmp           = { out = "Pred", ins = { "NumField", "Rel", "Num" } },
     tier_eq       = { out = "Pred", ins = { "Tier" } },
     min_tier      = { out = "Pred", ins = { "Tier" } },
+    family_eq     = { out = "Pred", ins = { "Family" } },    -- model-family identity (or-compose for a set)
     has_cap       = { out = "Pred", ins = { "Capability" } },
 
     -- Scorer — semimodule over Num; population-relative (normalize) ------
