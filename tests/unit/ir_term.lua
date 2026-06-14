@@ -21,6 +21,9 @@ t.test("check: a well-formed policy term has sort Policy", function()
     t.eq(sort, "Policy")
 end)
 
+-- unknown-op rejection is also the forward-compat guarantee of the
+-- append-only signature (SIGMA-POL §1.1): an old host fails closed on a newer
+-- op, it never silently diverges.
 t.test("check: rejects unknown ops, bad arity, bad params", function()
     local sort, err = T.check({ "frobnicate" })
     t.falsy(sort); t.contains(err, "unknown op")
