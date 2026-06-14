@@ -12,6 +12,32 @@ policy's is: the sha256 of a canonical encoding.
 on top. The reference modules are `llm_policy/flow.lua` (signature, admission,
 normal form, encoding, reference driver) over `llm_policy/term.lua`.
 
+## 0. What Σ_flow is *not* — declarative composition, not a workflow language
+
+Σ_pol's charter forbids a workflow language: no loops, no I/O, no effects, no
+non-determinism — *a term decides things, it does not do things.* Σ_flow keeps
+every one of those guarantees, and is admitted to the same algebra family on
+that basis, not in spite of it:
+
+- **Acyclic, not looping.** A flow is a DAG (`flow.check` rejects cycles); there
+  is no iteration construct. Evaluation visits each node once — O(|flow|), the
+  graph analogue of Σ_pol's O(|term|).
+- **No effects in the core.** `flow.run` is a pure scheduler; its single effect,
+  `run_node`, is *delegated* to the host — exactly as a policy's only effect,
+  `call_provider`, is. The core composes; the host calls.
+- **Deterministic structure.** Admission, normal form and identity are total and
+  reproducible; the encoding nests the policy bytes. Only the *text* a node
+  produces is non-deterministic, and that lives host-side where it always did
+  — fitting the validator-consensus model: same flow, same structure, replayable.
+- **Declarative, hashable data.** A flow is a value with an identity
+  (`sha256(encode(normalize(flow)))`), not a script. It is composed, downloaded,
+  and committed — never *run* by the algebra itself.
+
+So Σ_flow is not the imperative orchestration the anti-telos vetoes; it is the
+*declarative composition* of Σ_pol decisions, under Σ_pol's own discipline. The
+vetoed things — loops, side effects, non-deterministic structure, evaluation
+that isn't O(|flow|) — remain vetoed, here as in Σ_pol.
+
 ## 1. The model
 
 A flow is a directed acyclic graph with exactly **one source and one sink**:
