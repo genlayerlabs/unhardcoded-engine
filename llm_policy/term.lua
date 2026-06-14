@@ -130,6 +130,13 @@ end
 local function check_param(sort, v, schema)
     if sort == "Num" then
         if not is_finite_number(v) then return "expected a finite number" end
+    elseif sort == "Count" then
+        -- a bounded count: positive integer. Rejecting fractional/zero/negative
+        -- here keeps "the first k" from being implementation-defined across
+        -- hosts (no float truncation, no negative-index slicing to diverge on).
+        if not is_finite_number(v) or v % 1 ~= 0 or v < 1 then
+            return "expected a positive integer (Count >= 1)"
+        end
     elseif sort == "Rel" then
         if not SIG.RELS[v] then return "expected a relation (lt|le|eq|ne|ge|gt)" end
     elseif sort == "NumField" or sort == "BoolField" then

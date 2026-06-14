@@ -52,9 +52,9 @@ value. JSON arrays map 1:1 (`["cmp","price_out","le",25]`).
 
 Sorts: `Pred`, `Scorer`, `Selector`, `Xform`, `FailPlan`, `Evidence`,
 `Policy` (operational — subterm positions); parameters are scalars or flat
-records (`Num`, `Rel`, `NumField`, `BoolField`, `Tier`, `Family`, `Capability`,
-`ParamName`, `Scalar`, `Sym`, `Provenance`, `FailReason`, `Action`, `Recipe`,
-`Chain`). See `sig.lua` for the full operation table.
+records (`Num`, `Count`, `Rel`, `NumField`, `BoolField`, `Tier`, `Family`,
+`Capability`, `ParamName`, `Scalar`, `Sym`, `Provenance`, `FailReason`,
+`Action`, `Recipe`, `Chain`). See `sig.lua` for the full operation table.
 
 An `Action` record has a closed verb (`action`, optional `then_action` ∈
 `sequence.ACTIONS`) and typed core keys (`attempts`, `backoff_ms` —
@@ -264,7 +264,10 @@ path.
 ### 5.4 `top_k` — shortlisting
 
 `top_k(k, inner)` runs the inner Selector, then keeps only the first `k` of the
-resulting order (a no-op when `k ≥ #pool`). Since a Selector returns the whole
+resulting order (a no-op when `k ≥ #pool`). `k` is of sort `Count` — a positive
+integer; a non-integer, zero, or negative `k` is rejected at admission, so "the
+first `k`" is never implementation-defined (no float truncation, no
+negative-index slicing for hosts to diverge on). Since a Selector returns the whole
 ordering and the engine consumes it as the failover sequence, this bounds how
 many candidates a call may try — "the 3 fastest" is `top_k(3, argmax)` over a
 speed Scorer; "the 5 best on benchmarks" is `top_k(5, argmax)` over a Scorer
