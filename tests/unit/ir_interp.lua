@@ -135,6 +135,24 @@ t.test("chain selector whitelists and orders by priority", function()
     t.eq(out[2].candidate.provider_id, "p1")
 end)
 
+t.test("top_k orders by the inner selector and keeps the first k", function()
+    local pol = ir.compile({ "policy",
+        { "ev_zero" }, { "top" }, { "field", "quality_hint" },
+        { "top_k", 2, { "argmax" } }, { "id" },
+        { "always", { action = "next_candidate" } },
+    })
+    local pop = { cand({ quality_hint = 0.5 }),
+                  cand({ provider_id = "p2", quality_hint = 0.9 }),
+                  cand({ provider_id = "p3", quality_hint = 0.7 }) }
+    local ordered = pol.plan(pop, ctx()).ordered
+    t.eq(#ordered, 2, "shortlist capped to k=2")
+    t.eq(ordered[1].candidate.provider_id, "p2", "best first (inner argmax)")
+    t.eq(ordered[2].candidate.provider_id, "p3", "second best kept, p1 dropped")
+    -- k larger than the pool is a no-op
+    local wide = ir.eval_sort({ "top_k", 9, { "argmax" } })
+    t.eq(#wide({ { candidate = cand(), score = 1 } }, ctx()), 1, "k>pool keeps all")
+end)
+
 t.test("xforms: set_param / inject_seed / clamp_param / jitter / filter_text / when", function()
     local c = ctx({ seed = 7 })
     local x = ev({ "seq",

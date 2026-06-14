@@ -84,6 +84,7 @@ S.ops = {
     ordered       = { out = "Selector", ins = {} },          -- keep input order
     sample        = { out = "Selector", ins = { "Num" } },   -- rank-geometric, temp (transcendental-free)
     chain         = { out = "Selector", ins = { "Chain" } }, -- greybox priority whitelist
+    top_k         = { out = "Selector", ins = { "Num", "Selector" } }, -- order by inner, keep first k
 
     -- Xform — monoid of request transforms -------------------------------
     id            = { out = "Xform", ins = {} },

@@ -116,6 +116,11 @@ function E.selector(profile, contract)
     if profile.selector == "chain" then
         return { "chain", (contract and contract.chain) or profile.chain or {} }
     end
+    if profile.selector == "top_k" then
+        local opts = profile.selector_opts or {}
+        local inner = opts.temp and { "sample", opts.temp } or { "argmax" }
+        return { "top_k", opts.k or 3, inner }
+    end
     return { "argmax" }
 end
 

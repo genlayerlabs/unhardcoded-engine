@@ -75,6 +75,15 @@ t.test("check: family_eq admits a family name; or-composes into a set", function
     t.falsy(sort); t.contains(err, "string (Family)")
 end)
 
+t.test("check: top_k wraps an inner selector with a numeric k", function()
+    t.eq(T.check({ "top_k", 3, { "argmax" } }), "Selector", "top_k(k, argmax) admits")
+    t.eq(T.check({ "top_k", 5, { "sample", 0.5 } }), "Selector", "top_k over sample admits")
+    local s1, e1 = T.check({ "top_k", 3 })                     -- missing inner selector
+    t.falsy(s1); t.contains(e1, "argument")
+    local s2, e2 = T.check({ "top_k", { "argmax" }, 3 })       -- args swapped: Num position gets a term
+    t.falsy(s2)
+end)
+
 t.test("normalize: AC flatten + sort makes order irrelevant", function()
     local a = { "cmp", "price_in", "le", 5 }
     local b = { "is", "has_tee" }

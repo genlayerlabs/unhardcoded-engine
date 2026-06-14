@@ -261,6 +261,16 @@ are arbitrary anyway). `temp = 0` reproduces the argmax order exactly;
 keeps the old exp-based behavior and is local-only, like everything on that
 path.
 
+### 5.4 `top_k` — shortlisting
+
+`top_k(k, inner)` runs the inner Selector, then keeps only the first `k` of the
+resulting order (a no-op when `k ≥ #pool`). Since a Selector returns the whole
+ordering and the engine consumes it as the failover sequence, this bounds how
+many candidates a call may try — "the 3 fastest" is `top_k(3, argmax)` over a
+speed Scorer; "the 5 best on benchmarks" is `top_k(5, argmax)` over a Scorer
+that sums the benchmark fields. It composes over any inner Selector (e.g.
+`top_k(3, sample(t))` shortlists a seeded draw).
+
 ## 6. Using it
 
 ```lua
