@@ -100,6 +100,17 @@ add{ name = "pred-structure", kind = "pred",
          { candidate = POP[3], ctx = CTX, note = "fallback < marketplace" },
      } }
 
+-- 5b. Pred: model-family set membership — the family_in lowering (or of
+-- family_eq). The cheapest-among-{A,B,C} use case rests on this predicate.
+add{ name = "pred-family-set", kind = "pred",
+     term = { "or", { "family_eq", "gpt-5.5" }, { "family_eq", "claude-opus-4-8" } },
+     cases = {
+         { candidate = cand{ model_family = "gpt-5.5" }, ctx = CTX, note = "in the set" },
+         { candidate = cand{ model_family = "claude-opus-4-8" }, ctx = CTX, note = "in the set" },
+         { candidate = cand{ model_family = "gemini-3.1-pro" }, ctx = CTX,
+           note = "not in the set -> or fails" },
+     } }
+
 -- 6. Policy decision: argmax over a gated, weighted scorer
 add{ name = "policy-argmax-gate", kind = "policy",
      term = { "policy",

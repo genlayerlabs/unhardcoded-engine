@@ -64,6 +64,14 @@ t.test("check: schema extensions admit declared fields only", function()
     t.contains(err, "undeclared field")
 end)
 
+t.test("check: family_eq admits a family name; or-composes into a set", function()
+    t.eq(T.check({ "family_eq", "gpt-5.5" }), "Pred", "a family name admits")
+    t.eq(T.check({ "or", { "family_eq", "gpt-5.5" }, { "family_eq", "claude-opus-4-8" } }),
+         "Pred", "or of family_eq is the family-set filter")
+    local sort, err = T.check({ "family_eq", 5 })             -- non-string family
+    t.falsy(sort); t.contains(err, "string (Family)")
+end)
+
 t.test("normalize: AC flatten + sort makes order irrelevant", function()
     local a = { "cmp", "price_in", "le", 5 }
     local b = { "is", "has_tee" }

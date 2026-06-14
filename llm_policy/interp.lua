@@ -181,6 +181,13 @@ function I.default_algebra(opts)
             return false, "min_tier"
         end
     end
+    alg.family_eq = function(a)
+        local family = a[1]
+        return function(cand, _ctx)
+            if cand.model_family == family then return true end
+            return false, "model_family"
+        end
+    end
     alg.has_cap = function(a)
         local cap = a[1]
         return function(cand, _ctx)

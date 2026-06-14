@@ -44,7 +44,7 @@ value. JSON arrays map 1:1 (`["cmp","price_out","le",25]`).
 
 Sorts: `Pred`, `Scorer`, `Selector`, `Xform`, `FailPlan`, `Evidence`,
 `Policy` (operational — subterm positions); parameters are scalars or flat
-records (`Num`, `Rel`, `NumField`, `BoolField`, `Tier`, `Capability`,
+records (`Num`, `Rel`, `NumField`, `BoolField`, `Tier`, `Family`, `Capability`,
 `ParamName`, `Scalar`, `Sym`, `Provenance`, `FailReason`, `Action`, `Recipe`,
 `Chain`). See `sig.lua` for the full operation table.
 
@@ -97,6 +97,14 @@ Defaults are conservative by design: a candidate with no declared price does
 **not** pass a price ceiling (the legacy declarative gate read missing as 0;
 the IR pins the strict reading). Tier order defaults to
 `fallback < marketplace < partner` and is declarable (`config.tier_order`).
+
+The categorical candidate attributes `tier` (`tier_eq`, `min_tier`) and
+`model_family` (`family_eq`) are observed directly off the candidate, not
+through the Num/Bool field schema — they carry no numeric default and need no
+declaration. `family_eq` is the single-family identity test; a *set* of
+families is the algebra's `or` of `family_eq` (the `family_in` surface sugar
+lowers to exactly that), so "the cheapest among {A, B, C}" is
+`or(family_eq A, family_eq B, family_eq C)` as the filter with a `cost` scorer.
 
 ## 4. Normal form and identity
 
