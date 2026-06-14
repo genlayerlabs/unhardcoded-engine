@@ -114,6 +114,30 @@ families is the algebra's `or` of `family_eq` (the `family_in` surface sugar
 lowers to exactly that), so "the cheapest among {A, B, C}" is
 `or(family_eq A, family_eq B, family_eq C)` as the filter with a `cost` scorer.
 
+### 3.1 Population-relative selection lives in the data, not the ops
+
+A candidate's standing *relative to a population* — "in the top 5 by an
+intelligence benchmark", "cheapest decile" — is **host-computed data, not a
+term operation**. The host ranks its catalog (a deterministic fact of the
+catalog, recomputed when the catalog changes, never per call) and exposes the
+result as a declared `Num` field (`config.fields`), e.g. `bench_a_rank`. The
+algebra then observes it with the ordinary per-candidate `cmp`:
+
+- "top 5 by A" is `cmp("bench_a_rank", "le", 5)` — a plain, local Pred.
+- The **intersection of independent shortlists** is just their `and`:
+  `and(cmp("bench_a_rank","le",5), cmp("bench_b_rank","le",5),
+  tier_eq("partner"), cmp("price_in","le",X))`, then ranked by a `cost`
+  scorer for "the cheapest of the survivors".
+
+This is deliberate. A predicate that ranked the *live* population itself would
+be the algebra's only non-local Pred: its verdict on a candidate would depend
+on which other candidates survived earlier host-side filtering (breakers,
+disabled), so the same `(policy, ctx)` could decide differently across hosts —
+the one thing the cross-host determinism property (§1, item 3) forbids. Keeping
+the ranking in the catalog (data) keeps every Pred local and every decision
+reproducible: expressiveness grows through the field vocabulary, not through a
+population-relative op.
+
 ## 4. Normal form and identity
 
 `term.normalize` applies the v1 equations: AC ops (`and`, `or`, `add`,

@@ -153,6 +153,43 @@ t.test("top_k orders by the inner selector and keeps the first k", function()
     t.eq(#wide({ { candidate = cand(), score = 1 } }, ctx()), 1, "k>pool keeps all")
 end)
 
+t.test("shortlist intersection = and() of cmp over host-computed rank fields (§3.1)", function()
+    -- "top-2 by A AND top-2 by B, partner, price<=15, cheapest" with NO
+    -- population-relative op: the rank is a declared field, the cut is `cmp`,
+    -- the intersection is `and`. Keeps every Pred local and the decision
+    -- reproducible (the rank is catalog data, not the live population).
+    local schema = ir.fields.schema{ extensions = {
+        bench_a_rank = { sort = "Num", default = 1e9 },
+        bench_b_rank = { sort = "Num", default = 1e9 },
+    } }
+    local pol = ir.compile({ "policy",
+        { "ev_zero" },
+        { "and", { "cmp", "bench_a_rank", "le", 2 },
+                 { "cmp", "bench_b_rank", "le", 2 },
+                 { "tier_eq", "partner" },
+                 { "cmp", "price_in", "le", 15 } },
+        { "neg", { "field", "price_in" } }, { "argmax" }, { "id" },
+        { "always", { action = "next_candidate" } },
+    }, { schema = schema })
+    local function m(id, ra, rb, tier, price)
+        return { provider_id = id, served_model_id = id, model_family = "f",
+                 api_kind = "openai_compatible", base_url = "http://x",
+                 capabilities = {}, tier = tier,
+                 bench_a_rank = ra, bench_b_rank = rb, price_in = price }
+    end
+    local pop = { m("m1", 1, 1, "partner", 10),       -- in both, partner, ok
+                  m("m2", 2, 2, "partner", 8),        -- in both, partner, cheaper → winner
+                  m("m3", 1, 3, "partner", 5),        -- rank_b=3 → out (even though cheapest)
+                  m("m4", 1, 1, "marketplace", 4) }   -- not partner → out
+    local plan = pol.plan(pop, { now_ms = 0, request = { requirements = {} } })
+    t.eq(#plan.ordered, 2, "only the top-2-in-both partners survive the intersection")
+    t.eq(plan.ordered[1].candidate.provider_id, "m2", "cheapest survivor ranked first")
+    local why = {}
+    for _, r in ipairs(plan.rejected) do why[r.provider] = r.reason end
+    t.contains(why.m3, "bench_b_rank")
+    t.eq(why.m4, "tier")
+end)
+
 t.test("xforms: set_param / inject_seed / clamp_param / jitter / filter_text / when", function()
     local c = ctx({ seed = 7 })
     local x = ev({ "seq",
