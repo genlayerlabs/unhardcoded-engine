@@ -894,8 +894,10 @@ local function new_run_state(contract)
         rejected      = rejected or {},
         decision_path = {},
         started_at_ms = started_at,
-        -- IR policies carry their identity; legacy closure profiles have none
+        -- IR policies carry their identity AND their normal-form term (the data
+        -- a host can surface/copy/commit); legacy closure profiles have neither
         policy_fingerprint = pol and pol.fingerprint or nil,
+        policy_term = pol and pol.term or nil,
     }
     if #ranked == 0 then
         state.trace.total_latency_ms = clock() - started_at

@@ -364,6 +364,8 @@ t.test("declarative profiles now compile through the IR (fingerprint in trace)",
     local res = router.execute({ profile = "default", prompt = "hi" })
     t.truthy(res.ok)
     t.truthy(res.trace.policy_fingerprint, "lowered profile carries its policy identity")
+    t.truthy(res.trace.policy_term and res.trace.policy_term[1] == "policy",
+        "and its normal-form term — the data a host can surface/copy/commit")
 
     local bd = router.rank({ profile = "default" })[1].score_breakdown
     t.truthy(bd.quality ~= nil, "named-atom breakdown preserved through the IR")
