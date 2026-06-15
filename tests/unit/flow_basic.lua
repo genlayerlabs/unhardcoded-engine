@@ -9,7 +9,7 @@ local function POLICY()
     return { "policy",
         { "ev_zero" },
         { "meets_req" },
-        { "quality" },
+        { "field", "quality_hint" },
         { "argmax" },
         { "id" },
         { "always", { action = "next_candidate" } },
@@ -43,7 +43,7 @@ t.test("normalize is idempotent and label-independent", function()
 
     -- the canonical encoding nests Σ_pol policy bytes and is version-prefixed
     t.contains(F.encode(f1), "sigma-flow/v1:")
-    t.contains(F.encode(f1), "sigma-pol/v1:")
+    t.contains(F.encode(f1), "sigma-pol/v2:")   -- nested policy bytes are v2
 end)
 
 t.test("swapping the two drafters' system prompts changes identity", function()
