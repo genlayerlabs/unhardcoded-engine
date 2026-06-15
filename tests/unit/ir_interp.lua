@@ -85,6 +85,16 @@ t.test("scorers are population-relative; normalize min-maxes over the pool", fun
 
     local degenerate = s({ pop[1] }, ctx())
     t.near(degenerate[1], 0, 1e-12, "degenerate population pins to 0")
+
+    -- a missing price defaults to +inf; normalize must pin it to 1 (the top),
+    -- never compute inf/inf = NaN (NaN scores are non-finite and break JSON /
+    -- deterministic ordering). p1 has a price in CTX, the others don't.
+    local sp = ev({ "normalize", { "field", "price_in" } })
+    local pv = sp({ cand({ price_in = 2 }), cand({ provider_id = "p2" }),
+                    cand({ provider_id = "p3" }) }, ctx())   -- p2/p3 have no price -> +inf
+    for i = 1, #pv do t.truthy(pv[i] == pv[i], "no NaN at position " .. i) end
+    t.near(pv[1], 0, 1e-12, "the only priced (finite) candidate -> 0")
+    t.near(pv[2], 1, 1e-12, "missing price (+inf) pins to 1")
 end)
 
 t.test("argmax orders by score, stable on ties; sample is seed-reproducible", function()

@@ -256,7 +256,20 @@ function I.default_algebra(opts)
                 for i = 1, #v do v[i] = 0 end
                 return v, b
             end
-            for i = 1, #v do v[i] = (v[i] - lo) / (hi - lo) end
+            -- Map to [0,1]; endpoints are pinned (max→1, min→0) so an infinite
+            -- bound (e.g. a missing price's +inf default) yields 1 at the top
+            -- and never inf/inf = NaN. NaN scores are non-finite (un-JSON-able,
+            -- non-deterministic comparisons), so they must never arise here.
+            for i = 1, #v do
+                local x = v[i]
+                if x >= hi then x = 1
+                elseif x <= lo then x = 0
+                else
+                    local d = (x - lo) / (hi - lo)
+                    x = (d ~= d) and 0 or d         -- guard residual NaN
+                end
+                v[i] = x
+            end
             return v, b
         end
     end
