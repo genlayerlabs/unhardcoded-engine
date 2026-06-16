@@ -54,8 +54,12 @@ local function validate_profile(name, p, profiles_table)
     if p.extends ~= nil and profiles_table[p.extends] == nil then
         return "profiles." .. name .. ".extends references unknown profile: " .. tostring(p.extends)
     end
-    if p.weights ~= nil and type(p.weights) ~= "table" then
-        return "profiles." .. name .. ".weights must be a table"
+    -- (sigma-pol/v2) `weights` removed: it only weighted the composite scorer
+    -- atoms (quality/speed/cost/…), all phantoms. Rank with an explicit
+    -- `profile.scorer` term (scale/add over real fields).
+    if p.weights ~= nil then
+        return "profiles." .. name .. ".weights was removed in sigma-pol/v2; "
+            .. "use profiles." .. name .. ".scorer (a Scorer term over real fields)"
     end
     return nil
 end

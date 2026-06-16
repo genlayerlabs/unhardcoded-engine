@@ -7,9 +7,8 @@ local F = require("llm_policy.flow")
 -- a minimal but complete Σ_pol Policy term (balanced-ish), reused per node
 local function POLICY()
     return { "policy",
-        { "ev_zero" },
         { "meets_req" },
-        { "field", "quality_hint" },
+        { "field", "context" },
         { "argmax" },
         { "id" },
         { "always", { action = "next_candidate" } },

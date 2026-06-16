@@ -181,7 +181,7 @@ return {
 
         default = {
             scorer = { "add",
-                { "scale", 0.40, { "field", "quality_hint" } },
+                { "scale", 0.40, { "field", "context" } },
                 { "scale", 0.25, { "neg", { "normalize", { "field", "latency_ms" } } } },
                 { "scale", 0.35, { "neg", { "normalize", { "field", "price_in" } } } },
             },
@@ -191,7 +191,7 @@ return {
         cheap_explore = {
             extends = "default",
             scorer = { "add",
-                { "scale", 0.15, { "field", "quality_hint" } },
+                { "scale", 0.15, { "field", "context" } },
                 { "scale", 0.15, { "neg", { "normalize", { "field", "latency_ms" } } } },
                 { "scale", 0.55, { "neg", { "normalize", { "field", "price_in" } } } },
                 { "scale", 0.15, { "normalize", { "field", "credits" } } },
@@ -202,7 +202,7 @@ return {
             extends = "default",
             hard_constraints = { privacy = "tee_required" },
             scorer = { "add",
-                { "scale", 0.50, { "field", "quality_hint" } },
+                { "scale", 0.50, { "field", "context" } },
                 { "scale", 0.20, { "neg", { "normalize", { "field", "latency_ms" } } } },
                 { "scale", 0.30, { "neg", { "normalize", { "field", "price_in" } } } },
             },
@@ -214,7 +214,7 @@ return {
             -- what the contract declares. Future work: per-profile capability filters
             -- (the current schema folds these into the contract instead).
             scorer = { "add",
-                { "scale", 0.50, { "field", "quality_hint" } },
+                { "scale", 0.50, { "field", "context" } },
                 { "scale", 0.20, { "neg", { "normalize", { "field", "latency_ms" } } } },
                 { "scale", 0.30, { "neg", { "normalize", { "field", "price_in" } } } },
             },
@@ -263,7 +263,7 @@ return {
     -- customs = { my_xform = function(req, cand, ctx) ... return req end },
 
     -- A profile may also pin a full IR policy directly:
-    -- profiles.pinned = { policy_ir = { "policy", { "ev_zero" }, ... } }
+    -- profiles.pinned = { policy_ir = { "policy", ... } }
 
     -- ============================================================
     -- Defaults overrides (optional)

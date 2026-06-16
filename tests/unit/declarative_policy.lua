@@ -19,7 +19,7 @@ local function config()
         profiles = {
             -- a full sentence in config: filter (named combinators) + mutate
             hardened = {
-                weights = { quality = 1.0 },
+                
                 filter  = { "requirements", { tier_in = { "partner" } } },   -- bare list = all_of
                 mutate  = { { filter_text = { "NFKC", "RmZeroWidth" } },
                             { jitter = { temperature = 0.5 } } },            -- bare list = pipe
@@ -72,7 +72,7 @@ t.test("unknown filter atom errors clearly", function()
     local ok = pcall(function()
         r.reset(); install_host()
         local cfg = config()
-        cfg.profiles.bad = { weights = { quality = 1 }, filter = { "nope" }, retry_policy = "balanced" }
+        cfg.profiles.bad = { filter = { "nope" }, retry_policy = "balanced" }
         assert(router.init(cfg))
         router.rank({ profile = "bad" })
     end)

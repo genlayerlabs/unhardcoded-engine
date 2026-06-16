@@ -33,7 +33,7 @@ local function base_config()
             },
         },
         profiles = {
-            default = { weights = { partner = 1.0 }, retry_policy = "balanced" },
+            default = { retry_policy = "balanced" },
         },
         retry_policies = {
             balanced = {

@@ -22,8 +22,8 @@ local function config()
             },
         },
         profiles = {
-            default = { weights = { partner = 1.0 } },
-            diverse = { weights = { partner = 1.0 },
+            default = {},
+            diverse = { 
                         selector = "softmax_sample", selector_opts = { temp = 0.5 } },
             -- greybox: deterministic priority chain (the genvm case), config-only
             greybox = { selector = "chain",

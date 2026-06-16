@@ -40,13 +40,12 @@ Fl.CORE = {
             local m = ema_of(c, ctx)
             return (m and m.price_out) or c.price_out
         end },
-    quality = { sort = "Num", default = 0, source = "state|catalog",
-        get = function(c, ctx)
-            local m = ema_of(c, ctx)
-            return (m and m.last_quality_eval) or c.quality_hint
-        end },
-    quality_hint = { sort = "Num", default = 0, source = "catalog",
-        get = function(c, _ctx) return c.quality_hint end },
+    -- (sigma-pol/v2) `quality` and `quality_hint` were REMOVED: neither denotes
+    -- an observable. `last_quality_eval` is never computed (the committed
+    -- metrics are hand-written placeholders), and `quality_hint` is a
+    -- hand-assigned static number — a phantom, not a measurement. The algebra
+    -- composes over reals (price, latency, context, …); a caller cannot order a
+    -- policy by a quantity nobody observes. See SIGMA-POL §1.
     latency_ms = { sort = "Num", default = math.huge, source = "state",
         get = function(c, ctx)
             local m = ema_of(c, ctx)

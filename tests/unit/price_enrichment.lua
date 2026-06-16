@@ -25,7 +25,7 @@ local function config_with_price_ceiling()
         profiles = {
             default = {
                 filter = { price_max = { input = 1.0, output = 5.0 } },
-                weights = { partner = 1.0 },
+                
                 retry_policy = "balanced",
             },
         },

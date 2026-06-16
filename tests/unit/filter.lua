@@ -34,7 +34,7 @@ local function make_config()
             },
         },
         profiles = {
-            default = { weights = { quality = 1 } },
+            default = {},
         },
     }
 end

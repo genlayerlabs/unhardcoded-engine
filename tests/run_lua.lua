@@ -5,7 +5,6 @@ package.path = package.path .. ";./tests/unit/?.lua"
 
 local files = {
     "tests/unit/profile_inheritance.lua",
-    "tests/unit/weights_and_score.lua",
     "tests/unit/filter.lua",
     "tests/unit/derive_needs.lua",
     "tests/unit/execute.lua",

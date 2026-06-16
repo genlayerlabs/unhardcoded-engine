@@ -26,7 +26,7 @@ S.VERSION = "sigma-pol/v2"
 -- Operational sorts: positions of these sorts take subterms.
 S.OP_SORTS = {
     Pred = true, Scorer = true, Selector = true, Xform = true,
-    FailPlan = true, Evidence = true, Policy = true,
+    FailPlan = true, Policy = true,
 }
 
 -- Parameter sorts and how to validate their values (see llm_policy.term):
@@ -105,16 +105,14 @@ S.ops = {
     always        = { out = "FailPlan", ins = { "Action" } },
     override      = { out = "FailPlan", ins = { "FailPlan", "FailReason", "Action" } },
 
-    -- Evidence — provisional semimodule (claims by provenance) -----------
-    ev_zero       = { out = "Evidence", ins = {} },
-    ev_add        = { out = "Evidence", variadic = "Evidence", ac = true, unit = "ev_zero" },
-    ev_scale      = { out = "Evidence", ins = { "Num", "Evidence" } },
-    decay         = { out = "Evidence", ins = { "Num", "Evidence" } },
-    from_prov     = { out = "Evidence", ins = { "Provenance" } },
-
     -- Policy — the single constructor -------------------------------------
+    -- (sigma-pol/v2) The Evidence slot and its whole sub-algebra (ev_zero/
+    -- ev_add/ev_scale/decay/from_prov) were REMOVED. Evidence never affected
+    -- the decision — the interpreter built the policy from filter/scorer/
+    -- selector/xform/failplan and ignored the evidence term — and `from_prov`
+    -- read the phantom `quality`/uncomputed claims. A policy is now five slots.
     policy        = { out = "Policy",
-                      ins = { "Evidence", "Pred", "Scorer", "Selector", "Xform", "FailPlan" } },
+                      ins = { "Pred", "Scorer", "Selector", "Xform", "FailPlan" } },
 }
 
 return S

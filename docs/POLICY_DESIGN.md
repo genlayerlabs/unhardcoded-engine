@@ -85,7 +85,7 @@ Two objects are *authored*; the third is *derived* and is what the verbs see.
 - **Provider** (authored — connection + identity):
   `{ provider_id, base_url, api_kind, auth, tier, scope, has_tee, no_log, discovery }`
 - **Model** (authored — what it can do):
-  `{ model_family, capabilities, quality_hint, served_by[] }`, where each
+  `{ model_family, capabilities, served_by[] }`, where each
   `served_by` binds a provider to its `served_model_id` and per-pairing overrides
   (e.g. price).
 - **Candidate** (derived = provider × served_by): the flattened unit `plan()`
@@ -96,7 +96,7 @@ Two objects are *authored*; the third is *derived* and is what the verbs see.
 The object holds **stable identity and properties**. **Live signals** — EMA
 latency, success rate, breaker state, discovered price, free credits — are **not
 part of the object**; they live in `ctx.state`, keyed by the candidate's id.
-`rank(speed)` reads `ctx.state.ema[id]`, not the object. This is why "redefining
+A latency scorer reads `ctx.state.ema[id]`, not the object. This is why "redefining
 an object" and "updating its health" are different operations — and it is where
 the redefinition rules in §4.4 come from.
 
@@ -112,12 +112,11 @@ the redefinition rules in §4.4 come from.
 | `api_kind` | provider | yes | openai_compatible | **routing-target** | mutate, host dispatch, engine |
 | `auth` | provider | no | `{kind="none"}` | **routing-target** | host resolver |
 | `capabilities` | model | yes (min: context) | — | **tunable** | filter (`requirements`), mutate |
-| `tier` | provider | no | fallback | **tunable** | filter (`tier_in`), rank (partner) |
-| `quality_hint` | model | no | 0.5 | **tunable** | rank (quality) |
-| `price_in` / `price_out` | served_by | no | 0 (free) | **tunable** | rank (cost) |
+| `tier` | provider | no | fallback | **tunable** | filter (`tier_in`) |
+| `price_in` / `price_out` | served_by | no | +inf | **tunable** | scorer (`field`), filter (`cmp` ceiling) |
 | `has_tee` / `no_log` | provider | no | false | **tunable** | filter (privacy) |
 | `offer` | discovery | marketplace only | — | **dynamic** | engine (forwarded) |
-| *(ema, breaker, credits)* | **`ctx.state` by id** | — | — | **dynamic** | rank (speed/quality), filter (`breaker_closed`) |
+| *(ema, breaker, credits)* | **`ctx.state` by id** | — | — | **dynamic** | scorer (`field`: latency/throughput), filter (`breaker_closed`) |
 
 ### 4.4 When and how a candidate is (re)defined
 
@@ -324,7 +323,7 @@ closure-compile path — local-only, no identity. See SIGMA-POL.md §6.
 -- subzero: CONVERGE (best available, cascade on failure)
 Policy{
   filter   = F.all_of{ F.not_disabled(), F.breaker_closed(), F.requirements() },
-  select   = R.argmax(R.custom(score_fields)),  -- v2: raw fields (price/latency/quality_hint)
+  select   = R.argmax(R.custom(score_fields)),  -- v2: raw fields (price/latency/context)
   mutate   = M.identity,                 -- converge => don't perturb
   sequence = balanced,
 }   -- ctx.seed = nil

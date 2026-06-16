@@ -36,7 +36,8 @@ function IR.constrain(policy_term, envelope_pred)
     end
     local out = {}
     for i, v in ipairs(policy_term) do out[i] = v end
-    out[3] = { "and", envelope_pred, policy_term[3] }
+    -- (sigma-pol/v2) Pred is slot 2 now (the Evidence slot at 2 was removed).
+    out[2] = { "and", envelope_pred, policy_term[2] }
     return out
 end
 

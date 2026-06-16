@@ -63,7 +63,7 @@ chain script cannot express at all:
 
 ```
 filter = all_of{ tier_in{ "partner", "tee" }, breaker_closed(), requirements() }
-select = argmax(score_fields)   -- v2: score raw fields (quality_hint, price, latency), no composite atoms
+select = argmax(score_fields)   -- v2: score raw fields (price, latency, context), no composite atoms
 mutate = pipe{ filter_text{ "NFKC", "RmZeroWidth", "NormalizeWS" },
                jitter{ temperature = 0.3 } }
 sequence = cascade-on-overload

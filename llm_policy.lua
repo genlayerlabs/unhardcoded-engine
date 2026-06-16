@@ -28,7 +28,7 @@ M.VERSION = "0.0.1"
 local CATALOG = {
     providers = nil,    -- [provider_id] = provider_table
     models    = nil,    -- [model_family] = model_table
-    profiles  = nil,    -- [profile_name] = resolved profile (inheritance flattened, weights renormalized)
+    profiles  = nil,    -- [profile_name] = resolved profile (inheritance flattened)
     retry     = nil,    -- [retry_policy_name] = { [error_kind] = action_table }
     candidates = nil,   -- list of { provider_id, model_family, served_model_id, capabilities }
 }
@@ -114,7 +114,7 @@ local function resolve_profile(name, profiles_table, seen)
     for k, v in pairs(p) do
         if k ~= "extends" then
             if type(v) == "table" and type(merged[k]) == "table" then
-                -- shallow merge nested tables (weights, hard_constraints, etc.)
+                -- shallow merge nested tables (hard_constraints, etc.)
                 local sub = shallow_copy(merged[k])
                 for kk, vv in pairs(v) do sub[kk] = vv end
                 merged[k] = sub
@@ -124,24 +124,6 @@ local function resolve_profile(name, profiles_table, seen)
         end
     end
     return merged
-end
-
-local function renormalize_weights(weights)
-    if weights == nil then return { quality = 1.0 } end
-    local sum = 0
-    for _, v in pairs(weights) do
-        if type(v) == "number" and v > 0 then sum = sum + v end
-    end
-    if sum == 0 then return weights end
-    local out = {}
-    for k, v in pairs(weights) do
-        if type(v) == "number" and v > 0 then
-            out[k] = v / sum
-        else
-            out[k] = 0
-        end
-    end
-    return out
 end
 
 -- ===========================================================================
@@ -210,12 +192,10 @@ function M.init(config, metrics)
         return false, err
     end
 
-    -- Resolve profile inheritance and renormalize weights
+    -- Resolve profile inheritance
     local resolved_profiles = {}
     for name, _ in pairs(config.profiles) do
-        local rp = resolve_profile(name, config.profiles)
-        rp.weights = renormalize_weights(rp.weights)
-        resolved_profiles[name] = rp
+        resolved_profiles[name] = resolve_profile(name, config.profiles)
     end
 
     -- Apply defaults overrides
@@ -547,15 +527,6 @@ function M.provider_status(now_ms)
     }
 end
 
-local function merged_weights(profile, contract)
-    local w = shallow_copy(profile.weights or {})
-    local ov = contract.weights_override
-    if type(ov) == "table" then
-        for k, v in pairs(ov) do w[k] = v end
-    end
-    return renormalize_weights(w)
-end
-
 -- Snapshot the mutable RUNTIME into a read-only ctx.state for the pure verbs.
 -- This is the impure bridge: only the engine reads/writes RUNTIME; the verbs
 -- only see ctx. Applies circuit-breaker TTL recovery as a side effect.
@@ -642,9 +613,11 @@ local function build_policy_for(profile, contract)
         ir_term = profile.policy_ir            -- operator's own; no envelope
     elseif spec_has_fn(profile.filter) or spec_has_fn(profile.mutate)
         or type(profile.select) == "function" then
-        -- legacy escape hatch: closures can't be terms
-        local weights = merged_weights(profile, contract)
-        local scorer  = R.weighted(weights)
+        -- legacy escape hatch: closures can't be terms.
+        -- (sigma-pol/v2) no weighted atoms: a closure profile brings its own
+        -- scorer function in profile.scorer, or it does not score.
+        local scorer = (type(profile.scorer) == "function" and profile.scorer)
+                    or function() return 0, {} end
         local selector
         if type(profile.select) == "function" then
             selector = profile.select          -- explicit R.* sentence
@@ -664,7 +637,6 @@ local function build_policy_for(profile, contract)
         }
     else
         ir_term = ELABORATE.profile(profile, {
-            weights     = merged_weights(profile, contract),
             retry_table = (profile.retry_policy and CATALOG.retry[profile.retry_policy]) or {},
             contract    = contract,
         })
@@ -1154,11 +1126,9 @@ M.ir = ir
 M._test = {
     validate_config        = validate_config,
     resolve_profile        = resolve_profile,
-    renormalize_weights    = renormalize_weights,
     build_candidate_matrix = build_candidate_matrix,
     rank_candidates        = rank_candidates,
     resolve_plan           = resolve_plan,
-    merged_weights         = merged_weights,
     circuit_breaker_state  = circuit_breaker_state,
     build_request          = build_request,
     classify_action        = classify_action,

@@ -24,7 +24,7 @@ local function config(server_error_backoff)
             },
         },
         profiles = {
-            default = { weights = { partner = 1.0 }, retry_policy = "balanced" },
+            default = { retry_policy = "balanced" },
         },
         retry_policies = {
             balanced = {

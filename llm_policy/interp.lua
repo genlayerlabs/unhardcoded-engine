@@ -457,41 +457,13 @@ function I.default_algebra(opts)
         return out
     end
 
-    -- ---- Evidence (provisional) -------------------------------------------
-    alg.ev_zero = function() return function() return 0 end end
-    alg.ev_add = function(es)
-        return function(cand, ctx)
-            local sum = 0
-            for _, e in ipairs(es) do sum = sum + e(cand, ctx) end
-            return sum
-        end
-    end
-    alg.ev_scale = function(a)
-        local w, e = a[1], a[2]
-        return function(cand, ctx) return w * e(cand, ctx) end
-    end
-    alg.decay = function(a)                    -- placeholder semantics, provisional
-        local rate, e = a[1], a[2]
-        return function(cand, ctx) return rate * e(cand, ctx) end
-    end
-    alg.from_prov = function(a)
-        local prov = a[1]
-        return function(cand, ctx)
-            if prov == "self" then
-                local ema = ctx.state and ctx.state.ema or nil
-                local m = ema and ema[util.pm_key(cand.provider_id, cand.model_family)]
-                return (m and m.last_quality_eval) or cand.quality_hint or 0
-            end
-            local claims = ctx.state and ctx.state.claims or nil
-            local by_prov = claims and claims[prov]
-            return (by_prov and by_prov[util.pm_key(cand.provider_id, cand.model_family)]) or 0
-        end
-    end
-
     -- ---- Policy -------------------------------------------------------------
+    -- (sigma-pol/v2) the Evidence sub-algebra was removed (see sig.lua): it
+    -- never affected the decision and `from_prov` read the phantom quality.
+    -- A policy is five slots: filter / scorer / selector / xform / failplan.
     alg.policy = function(a)
-        local evidence, pred, scorer, selector, xform, failplan =
-            a[1], a[2], a[3], a[4], a[5], a[6]
+        local pred, scorer, selector, xform, failplan =
+            a[1], a[2], a[3], a[4], a[5]
         local pol = Policy.new{
             filter = pred,
             select = function(cands, ctx)
@@ -511,7 +483,6 @@ function I.default_algebra(opts)
             mutate   = xform,
             sequence = failplan,
         }
-        pol.evidence = evidence
         return pol
     end
 

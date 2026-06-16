@@ -65,8 +65,9 @@ function E.filter(spec)
             for _, f in ipairs(spec.family_in) do out[#out + 1] = { "family_eq", f } end
             return #out == 2 and out[2] or out
         end
-        if spec.quality_min then return { "cmp", "quality_hint", "ge", spec.quality_min } end
-        if spec.quality_max then return { "cmp", "quality_hint", "lt", spec.quality_max } end
+        -- (sigma-pol/v2) quality_min/quality_max removed with the `quality`
+        -- field: it denoted no observable (hand-assigned hint / uncomputed eval).
+        -- Gate on a real field instead (e.g. price/latency/context).
         if spec.price_max then
             local out = { "and" }
             if spec.price_max.input then
@@ -186,7 +187,6 @@ end
 function E.profile(profile, opts)
     opts = opts or {}
     return { "policy",
-        { "ev_zero" },
         E.filter(profile.filter),
         { "gate", { "not", { "is", "breaker_open" } },
           opts.scorer or profile.scorer or { "zero" } },
