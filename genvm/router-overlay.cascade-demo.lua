@@ -13,9 +13,14 @@ return {
     },
     profiles = {
         default = {
-            -- (sigma-pol/v2) `weights`/composite atoms removed; score on real
-            -- fields. Tier preference is now a FILTER concern (min_tier/tier_eq),
-            -- not a scorer — partner can't be a scoring dimension any more.
+            -- (sigma-pol/v2) `weights`/composite atoms removed. Tier is no longer
+            -- a scoring dimension (the `partner` atom is gone), and a tier FILTER
+            -- here would exclude the `dev` fallback the cascade exists to reach —
+            -- so neither replaces the old partner-crank. The cascade order comes
+            -- from this scorer (cheapest first; with no prices declared, ties
+            -- keep catalog order — heurist before dev) plus the retry policy's
+            -- `next_candidate` fall-through. For strict explicit tier priority,
+            -- use the `chain` selector (see the greybox profile in dispatch.lua).
             scorer = { "neg", { "normalize", { "field", "price_in" } } },
             retry_policy = "default",
         },
