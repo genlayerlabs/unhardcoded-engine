@@ -89,10 +89,16 @@ local function build_catalog(providers_db, overlay)
     end
 
     -- Default profiles/policies: `greybox` (deterministic chain + cascade) and a
-    -- weighted `default` fallback. Overlays shallow-merge on top.
+    -- field-scored `default` fallback. Overlays shallow-merge on top.
+    -- (sigma-pol/v2) `weights`/composite atoms removed; a profile carries a raw
+    -- Scorer term over real fields (cheaper + faster + roomier context).
     local profiles = {
         default = {
-            weights = { quality = 0.5, speed = 0.2, cost = 0.2, partner = 0.1, free_credit = 0.0 },
+            scorer = { "add",
+                { "scale", 0.5, { "neg", { "normalize", { "field", "price_in" } } } },
+                { "scale", 0.3, { "neg", { "normalize", { "field", "latency_ms" } } } },
+                { "scale", 0.2, { "normalize", { "field", "context" } } },
+            },
             retry_policy = "default",
         },
         greybox = { selector = "chain", retry_policy = "cascade" },

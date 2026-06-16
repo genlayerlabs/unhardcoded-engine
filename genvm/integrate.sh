@@ -18,7 +18,7 @@
 #   ya-test-runner run --filter-name tests/cases/unstable/nondet/llm/call_llm.jsonnet
 #
 # Pass --overlay <path> to also install a router-overlay.lua module that
-# customises weights/profiles/retry policies per deployment.
+# customises profiles (filter/scorer/retry) per deployment.
 
 set -euo pipefail
 

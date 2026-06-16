@@ -32,12 +32,12 @@ return {
 
     profiles = {
         default = {
-            weights = {
-                quality     = 0.45,
-                speed       = 0.15,
-                cost        = 0.30,
-                partner     = 0.10,
-                free_credit = 0.00,
+            -- (sigma-pol/v2) `weights`/composite atoms removed; score on real
+            -- fields. neg(normalize(price/latency)) = cheaper/faster ranks higher.
+            scorer = { "add",
+                { "scale", 0.55, { "neg", { "normalize", { "field", "price_in" } } } },
+                { "scale", 0.25, { "neg", { "normalize", { "field", "latency_ms" } } } },
+                { "scale", 0.20, { "normalize", { "field", "context" } } },
             },
             retry_policy = "default",
         },
