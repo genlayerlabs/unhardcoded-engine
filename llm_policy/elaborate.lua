@@ -1,11 +1,12 @@
 -- llm_policy.elaborate — surface syntax -> Σ_pol terms.
 --
--- The declarative profile format (filter/mutate specs, weights, selector,
+-- The declarative profile format (filter/mutate specs, scorer term, selector,
 -- retry tables) is sugar; this module desugars it into IR terms so existing
 -- configs gain canonical form + hash without being rewritten. n-ary sugar
--- (all_of, weighted, pipe) lowers to the signature's variadic/binary ops;
--- legacy named atoms lower to field observations (not_disabled ->
--- not(is("disabled")), price/quality gates -> cmp).
+-- (all_of, pipe) lowers to the signature's variadic/binary ops; legacy named
+-- atoms lower to field observations (not_disabled -> not(is("disabled")),
+-- price gates -> cmp). (sigma-pol/v2: `weighted` sugar removed with the
+-- composite atoms — a profile carries an explicit `scorer` term.)
 --
 -- Maps are lowered in sorted key order so elaboration is deterministic
 -- (pairs() order is not). Note one pinned divergence: cmp observes through the
