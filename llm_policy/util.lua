@@ -33,8 +33,14 @@ function U.table_contains(t, v)
     return false
 end
 
--- Composite key for per-(provider,model) runtime state (EMA, etc.).
-function U.pm_key(provider_id, model_family)
+-- Composite key for per-(provider,model[,peer]) runtime state (EMA, etc.).
+-- Marketplace candidates pass the seller peer so reliability/latency is learned
+-- per peer, not lumped per provider|family; static providers pass no peer and
+-- key on provider|family (unchanged).
+function U.pm_key(provider_id, model_family, peer_id)
+    if peer_id then
+        return provider_id .. "|" .. model_family .. "|" .. peer_id
+    end
     return provider_id .. "|" .. model_family
 end
 

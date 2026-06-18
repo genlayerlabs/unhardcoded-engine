@@ -69,7 +69,8 @@ function F.requirements()
             return false, "min_quality"
         end
         if req.min_tok_s then
-            local m = ctx.state.ema[pm_key(cand.provider_id, cand.model_family)]
+            local m = ctx.state.ema[pm_key(cand.provider_id, cand.model_family,
+                                           cand.offer and cand.offer.peer_id or nil)]
             local observed = m and m.ema_tok_s or nil
             if observed == nil or observed < req.min_tok_s then
                 return false, "min_tok_s"

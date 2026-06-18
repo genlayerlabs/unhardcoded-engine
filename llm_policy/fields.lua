@@ -25,7 +25,10 @@ local Fl = {}
 
 local function ema_of(cand, ctx)
     local ema = ctx.state and ctx.state.ema or nil
-    return ema and ema[pm_key(cand.provider_id, cand.model_family)] or nil
+    -- marketplace candidates learn per seller peer (offer.peer_id); static
+    -- providers have no offer, so peer is nil and the key stays provider|family.
+    local peer = cand.offer and cand.offer.peer_id or nil
+    return ema and ema[pm_key(cand.provider_id, cand.model_family, peer)] or nil
 end
 
 -- Core vocabulary. get(cand, ctx) -> value | nil; nil means "absent, use default".

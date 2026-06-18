@@ -501,9 +501,20 @@ function M.provider_status(now_ms)
             -- no "|", so the first "|" splits cleanly.
             local bar = string.find(key, "|", 1, true)
             if bar then
-                local pid    = string.sub(key, 1, bar - 1)
-                local family = string.sub(key, bar + 1)
-                ensure(pid).models[family] = {
+                local pid  = string.sub(key, 1, bar - 1)
+                local rest = string.sub(key, bar + 1)
+                -- marketplace keys carry a 3rd segment (family|peer). Label the
+                -- row "family @ peer8" so the inspector stays per-family-readable
+                -- while exposing which seller the metrics belong to; static
+                -- providers have no peer and render as the bare family.
+                local family, peer = rest, nil
+                local bar2 = string.find(rest, "|", 1, true)
+                if bar2 then
+                    family = string.sub(rest, 1, bar2 - 1)
+                    peer   = string.sub(rest, bar2 + 1)
+                end
+                local label = peer and (family .. " @ " .. string.sub(peer, 1, 8)) or family
+                ensure(pid).models[label] = {
                     success_rate      = m.success_rate_ewma,
                     avg_latency_ms    = m.ema_latency_ms,
                     observations      = m.n or 0,
@@ -779,8 +790,8 @@ local function update_breaker_on_success(provider_id)
     end
 end
 
-local function update_ema(provider_id, model_family, latency_ms, ok)
-    local k = pm_key(provider_id, model_family)
+local function update_ema(provider_id, model_family, peer_id, latency_ms, ok)
+    local k = pm_key(provider_id, model_family, peer_id)
     local m = RUNTIME.ema_metrics[k] or { n = 0 }
     local alpha = DEFAULTS.ema_alpha
 
@@ -929,7 +940,8 @@ local function handle_response(state, response)
     state.pending_cand = nil
     state.awaiting     = nil
 
-    update_ema(cand.provider_id, cand.model_family, elapsed, response.ok and true or false)
+    update_ema(cand.provider_id, cand.model_family, cand.offer and cand.offer.peer_id or nil,
+               elapsed, response.ok and true or false)
 
     local event = {
         event        = "attempted",
