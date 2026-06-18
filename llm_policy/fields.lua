@@ -46,20 +46,25 @@ Fl.CORE = {
     -- hand-assigned static number — a phantom, not a measurement. The algebra
     -- composes over reals (price, latency, context, …); a caller cannot order a
     -- policy by a quantity nobody observes. See SIGMA-POL §1.
-    latency_ms = { sort = "Num", default = math.huge, source = "state",
+    -- Reliability/perf observables. Host-supplied like price: the host measures
+    -- per-route reliability however it sees fit and stamps it on the candidate
+    -- (offer); the algebra observes it pointwise and needs no notion of route.
+    -- The candidate value WINS; the engine's own EMA (ema_of) remains only as a
+    -- fallback for providers the host did not stamp (e.g. static ones).
+    latency_ms = { sort = "Num", default = math.huge, source = "catalog|state",
         get = function(c, ctx)
             local m = ema_of(c, ctx)
-            return m and m.ema_latency_ms
+            return c.latency_ms or (m and m.ema_latency_ms)
         end },
-    tok_s = { sort = "Num", default = 0, source = "state",
+    tok_s = { sort = "Num", default = 0, source = "catalog|state",
         get = function(c, ctx)
             local m = ema_of(c, ctx)
-            return m and m.ema_tok_s
+            return c.tok_s or (m and m.ema_tok_s)
         end },
-    success_rate = { sort = "Num", default = 1, source = "state",
+    success_rate = { sort = "Num", default = 1, source = "catalog|state",
         get = function(c, ctx)
             local m = ema_of(c, ctx)
-            return m and m.success_rate_ewma
+            return c.success_rate or (m and m.success_rate_ewma)
         end },
     credits = { sort = "Num", default = 0, source = "state",
         get = function(c, ctx)

@@ -349,6 +349,12 @@ local function gather_marketplace_candidates(now_ms)
                         quality_hint    = offer.quality_hint,
                         price_in        = offer.price_in_usd_per_mtok,
                         price_out       = offer.price_out_usd_per_mtok,
+                        -- host-measured reliability/perf for THIS route, stamped
+                        -- on the offer like price; observed pointwise by the
+                        -- algebra (fields.lua), which needs no notion of route.
+                        success_rate    = offer.success_rate,
+                        latency_ms      = offer.latency_ms,
+                        tok_s           = offer.tok_s,
                         tier            = p.tier or "marketplace",
                         has_tee         = p.has_tee or false,
                         no_log          = p.no_log or false,
