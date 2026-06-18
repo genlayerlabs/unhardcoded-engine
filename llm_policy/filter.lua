@@ -5,9 +5,6 @@
 -- today's trace.rejected reasons). Pure: reads ctx.request + ctx.state, never a
 -- global. See docs/POLICY_DESIGN.md §5.1.
 
-local util   = require("llm_policy.util")
-local pm_key = util.pm_key
-
 local F = {}
 
 local NEED_TO_CAP = {
@@ -69,9 +66,10 @@ function F.requirements()
             return false, "min_quality"
         end
         if req.min_tok_s then
-            local m = ctx.state.ema[pm_key(cand.provider_id, cand.model_family)]
-            local observed = m and m.ema_tok_s or nil
-            if observed == nil or observed < req.min_tok_s then
+            -- Throughput is host-observed, stamped on the candidate (like price);
+            -- the engine no longer folds it. An unstamped candidate cannot
+            -- guarantee the floor, so it is rejected.
+            if (cand.tok_s or 0) < req.min_tok_s then
                 return false, "min_tok_s"
             end
         end

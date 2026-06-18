@@ -46,26 +46,17 @@ Fl.CORE = {
     -- hand-assigned static number — a phantom, not a measurement. The algebra
     -- composes over reals (price, latency, context, …); a caller cannot order a
     -- policy by a quantity nobody observes. See SIGMA-POL §1.
-    -- Reliability/perf observables. Host-supplied like price: the host measures
-    -- per-route reliability however it sees fit and stamps it on the candidate
-    -- (offer); the algebra observes it pointwise and needs no notion of route.
-    -- The candidate value WINS; the engine's own EMA (ema_of) remains only as a
-    -- fallback for providers the host did not stamp (e.g. static ones).
-    latency_ms = { sort = "Num", default = math.huge, source = "catalog|state",
-        get = function(c, ctx)
-            local m = ema_of(c, ctx)
-            return c.latency_ms or (m and m.ema_latency_ms)
-        end },
-    tok_s = { sort = "Num", default = 0, source = "catalog|state",
-        get = function(c, ctx)
-            local m = ema_of(c, ctx)
-            return c.tok_s or (m and m.ema_tok_s)
-        end },
-    success_rate = { sort = "Num", default = 1, source = "catalog|state",
-        get = function(c, ctx)
-            local m = ema_of(c, ctx)
-            return c.success_rate or (m and m.success_rate_ewma)
-        end },
+    -- Reliability/perf observables are host-supplied, observed pointwise off the
+    -- candidate: the host measures per-route reliability however it sees fit and
+    -- stamps it like price. The algebra needs no notion of route, and the engine
+    -- neither folds nor owns these — there is no EMA fallback; an unstamped
+    -- candidate reads the field default.
+    latency_ms = { sort = "Num", default = math.huge, source = "catalog",
+        get = function(c, _ctx) return c.latency_ms end },
+    tok_s = { sort = "Num", default = 0, source = "catalog",
+        get = function(c, _ctx) return c.tok_s end },
+    success_rate = { sort = "Num", default = 1, source = "catalog",
+        get = function(c, _ctx) return c.success_rate end },
     credits = { sort = "Num", default = 0, source = "state",
         get = function(c, ctx)
             local credits = ctx.state and ctx.state.credits or nil

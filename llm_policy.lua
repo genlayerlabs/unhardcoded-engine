@@ -36,7 +36,7 @@ local CATALOG = {
 -- Mutable runtime state. dump_state/restore_state work on this.
 local RUNTIME = {
     circuit_breakers   = {},  -- [provider_id] = { open, opened_at_ms, consecutive_failures }
-    ema_metrics        = {},  -- [provider_id .. "|" .. model_family] = { ema_latency_ms, success_rate_ewma, n }
+    ema_metrics        = {},  -- [provider_id .. "|" .. model_family] = { price_in, price_out, last_quality_eval }; reliability is host-owned (#15)
     disabled_providers = {},  -- [provider_id] = { kind = error_kind, at_ms } (legacy: reason_string)
     discovery_cache    = {},  -- [discovery_id] = { offers, fetched_at_ms }
     initialized        = false,
@@ -49,7 +49,6 @@ local DEFAULTS = {
     circuit_breaker_failure_ms      = 5 * 60 * 1000,
     disable_provider_ttl_ms         = 5 * 60 * 1000,
     discovery_cache_ttl_ms          = 60 * 1000,
-    ema_alpha                       = 0.2,
     free_credit_threshold_usd       = 1.0,
 }
 
@@ -155,16 +154,14 @@ local function seed_runtime_from_metrics(metrics)
                 -- skip malformed
                 goto continue
             end
+            -- Reliability/latency are host-supplied (observed off the candidate);
+            -- the seed carries only price (read by enrich_with_prices for static
+            -- candidates) and the quality hint.
             local k = pm_key(provider, family)
             RUNTIME.ema_metrics[k] = {
-                ema_latency_ms    = mm.ttft_ms_p50,
-                ema_tok_s         = mm.tok_s_p50,
-                success_rate_ewma = mm.success_rate_24h or 1.0,
                 price_in          = mm.price_in_usd_per_mtok,
                 price_out         = mm.price_out_usd_per_mtok,
-                -- without this, R.quality always fell back to the static hint
                 last_quality_eval = mm.last_quality_eval,
-                n                 = 0,  -- bench observations don't count as live observations
             }
             ::continue::
         end
@@ -293,7 +290,7 @@ end
 
 function M.update_metrics(provider_id, model_family, delta)
     local k = pm_key(provider_id, model_family)
-    local cur = RUNTIME.ema_metrics[k] or { n = 0 }
+    local cur = RUNTIME.ema_metrics[k] or {}
     for kk, vv in pairs(delta) do cur[kk] = vv end
     RUNTIME.ema_metrics[k] = cur
 end
@@ -493,7 +490,8 @@ function M.provider_status(now_ms)
         ensure(pid).disabled = disable_view(d, now_ms)
     end
 
-    -- EMA metrics: per-model success-rate / latency / pricing, plus credits.
+    -- Seeded price per model + credits. Reliability/latency are host-owned now
+    -- (observed off the candidate), so the engine surfaces neither.
     for key, m in pairs(RUNTIME.ema_metrics or {}) do
         local credit_pid = string.match(key, "^__credits|(.+)$")
         if credit_pid then
@@ -510,9 +508,6 @@ function M.provider_status(now_ms)
                 local pid    = string.sub(key, 1, bar - 1)
                 local family = string.sub(key, bar + 1)
                 ensure(pid).models[family] = {
-                    success_rate      = m.success_rate_ewma,
-                    avg_latency_ms    = m.ema_latency_ms,
-                    observations      = m.n or 0,
                     price_in          = m.price_in,
                     price_out         = m.price_out,
                     last_quality_eval = m.last_quality_eval,
@@ -785,29 +780,10 @@ local function update_breaker_on_success(provider_id)
     end
 end
 
-local function update_ema(provider_id, model_family, latency_ms, ok)
-    local k = pm_key(provider_id, model_family)
-    local m = RUNTIME.ema_metrics[k] or { n = 0 }
-    local alpha = DEFAULTS.ema_alpha
-
-    if latency_ms ~= nil then
-        if m.ema_latency_ms == nil then
-            m.ema_latency_ms = latency_ms
-        else
-            m.ema_latency_ms = alpha * latency_ms + (1 - alpha) * m.ema_latency_ms
-        end
-    end
-
-    local s = ok and 1 or 0
-    if m.success_rate_ewma == nil then
-        m.success_rate_ewma = s
-    else
-        m.success_rate_ewma = alpha * s + (1 - alpha) * m.success_rate_ewma
-    end
-
-    m.n = (m.n or 0) + 1
-    RUNTIME.ema_metrics[k] = m
-end
+-- (reliability fold removed) The engine no longer folds success-rate/latency.
+-- Reliability is host-supplied, observed pointwise off the candidate
+-- (fields.lua: success_rate / latency_ms / tok_s). Breakers/disables and the
+-- price/credit seed stay in RUNTIME.ema_metrics; reliability does not.
 
 local function classify_action(profile, error_kind)
     local retry_table = (profile and profile.retry_policy and CATALOG.retry[profile.retry_policy]) or {}
@@ -934,8 +910,6 @@ local function handle_response(state, response)
     local elapsed = clock() - (state.call_start or clock())
     state.pending_cand = nil
     state.awaiting     = nil
-
-    update_ema(cand.provider_id, cand.model_family, elapsed, response.ok and true or false)
 
     local event = {
         event        = "attempted",

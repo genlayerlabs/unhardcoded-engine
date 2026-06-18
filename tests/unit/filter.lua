@@ -5,6 +5,7 @@
 local t = require("_assert")
 local router = dofile("router.lua")
 local r = router._test
+local F = require("llm_policy.filter")
 
 local function make_config()
     return {
@@ -125,4 +126,31 @@ t.test("json_mode via response_format filters correctly", function()
     local s = survivors({ response_format = { type = "json_object" } })
     t.truthy(#s >= 1)
     for _, c in ipairs(s) do t.eq(c.model_family, "chat", "only json-capable model survives") end
+end)
+
+-- min_tok_s observes throughput pointwise off the host-stamped candidate
+-- (reliability/perf are host-owned, #15); the engine fold is gone, so there is
+-- no ctx.state.ema fallback. Exercised at the predicate atom: it reads only the
+-- candidate, independent of catalog plumbing.
+t.test("min_tok_s passes a candidate stamped at or above the floor", function()
+    local pred = F.requirements()
+    local ctx  = { request = { requirements = { min_tok_s = 30 } } }
+    t.truthy(pred({ provider_id = "p", model_family = "m", tok_s = 50 }, ctx),
+             "50 tok/s clears a 30 floor")
+end)
+
+t.test("min_tok_s rejects a candidate stamped below the floor", function()
+    local pred = F.requirements()
+    local ctx  = { request = { requirements = { min_tok_s = 30 } } }
+    local ok, reason = pred({ provider_id = "p", model_family = "m", tok_s = 10 }, ctx)
+    t.falsy(ok, "10 tok/s fails a 30 floor")
+    t.eq(reason, "min_tok_s", "rejection reason preserved")
+end)
+
+t.test("min_tok_s rejects an unstamped candidate (the floor cannot be guaranteed)", function()
+    local pred = F.requirements()
+    local ctx  = { request = { requirements = { min_tok_s = 30 } } }
+    local ok, reason = pred({ provider_id = "p", model_family = "m" }, ctx)
+    t.falsy(ok, "no throughput observation -> no guarantee")
+    t.eq(reason, "min_tok_s")
 end)
