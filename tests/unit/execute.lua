@@ -251,16 +251,17 @@ t.test("circuit breaker opens after rate_limit with open_breaker_ms", function()
     t.truthy(b.open, "breaker is open")
 end)
 
-t.test("EMA latency is updated on every call", function()
+t.test("the engine no longer folds reliability (it is host-supplied)", function()
     reset()
     mock_host({
         p1 = { { ok = true, response = { text = "x" } } },
     })
     router.execute({ prompt = "hi", profile = "default" })
+    -- a successful call must NOT create an engine-side reliability slot:
+    -- reliability is observed off the candidate, never folded here.
     local m = r.runtime().ema_metrics[r.pm_key("p1", "m1")]
-    t.truthy(m, "metrics slot created")
-    t.truthy(m.ema_latency_ms ~= nil, "latency recorded")
-    t.eq(m.success_rate_ewma, 1, "success rate seeded to 1 on first OK")
+    t.truthy(m == nil or (m.success_rate_ewma == nil and m.ema_latency_ms == nil),
+             "no engine reliability fold after a call")
 end)
 
 t.test("disabled provider is skipped if already disabled at execute time", function()

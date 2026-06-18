@@ -31,6 +31,13 @@ local function config()
             default = { retry_policy = "balanced",
                         scorer = { "field", "success_rate" },
                         selector = "argmax" },
+            -- marketplace-only: filters the static fallback out so the two
+            -- routes compete on their stamped reliability alone (a static
+            -- provider has no stamp, so it reads the default 1.0).
+            mkt = { retry_policy = "balanced",
+                    filter = { tier_in = { "marketplace" } },
+                    scorer = { "field", "success_rate" },
+                    selector = "argmax" },
         },
         retry_policies = {
             balanced = {
@@ -72,35 +79,32 @@ local function mock_host()
     }
 end
 
-t.test("selection runs on host-stamped reliability, pointwise, candidate over engine", function()
+t.test("selection runs on host-stamped reliability, pointwise (no engine fold)", function()
     r.reset()
     assert(router.init(config()))
     mock_host()
-    -- static fallback's reliability comes from the engine EMA (the retained
-    -- fallback path) — seed it mid so it cannot win the scorer.
-    r.runtime().ema_metrics[r.pm_key("slow", "m1")] = { success_rate_ewma = 0.5, n = 0 }
-    -- a MISLEADING engine slot for the marketplace family: the candidate-stamped
-    -- value must override it (the host owns marketplace reliability).
-    r.runtime().ema_metrics[r.pm_key("mkt", "m1")]  = { success_rate_ewma = 0.0, n = 0 }
+    -- a seeded engine slot for the family must be INERT — there is no fallback;
+    -- reliability is read off the candidate the host stamped.
+    r.runtime().ema_metrics[r.pm_key("mkt", "m1")] = { success_rate_ewma = 0.0, n = 0 }
 
-    local res = router.execute({ prompt = "hi", profile = "default" })
+    local res = router.execute({ prompt = "hi", profile = "mkt" })
     t.truthy(res.ok, "request served")
-    t.eq(res.chosen.provider_id, "mkt",
-         "marketplace beat the static fallback on stamped reliability (0.99 > 0.5)")
+    t.eq(res.chosen.provider_id, "mkt", "served by the marketplace provider")
     t.eq(CALLED[1], "routeGood",
-         "pinned the route the host stamped most reliable (0.99 > 0.10), not the engine's 0.0")
+         "pinned the route the host stamped most reliable (0.99 > 0.10), engine slot ignored")
 end)
 
-t.test("an unstamped candidate falls back to the engine EMA (static providers keep working)", function()
+t.test("an unstamped candidate uses the field default, not any engine EMA", function()
     r.reset()
     assert(router.init(config()))
     mock_host()
-    -- no marketplace offers this time: force the static fallback to be chosen and
-    -- show its reliability is read from the engine EMA (the fallback path).
+    -- no marketplace offers: the static fallback is the only candidate.
     host.discover = function() return { ok = true, offers = {}, fetched_at_ms = 0 } end
-    r.runtime().ema_metrics[r.pm_key("slow", "m1")] = { success_rate_ewma = 0.7, n = 0 }
+    -- a seeded engine reliability slot must be INERT — there is no fallback;
+    -- an unstamped candidate reads the field default, not this slot.
+    r.runtime().ema_metrics[r.pm_key("slow", "m1")] = { success_rate_ewma = 0.0, n = 0 }
 
     local res = router.execute({ prompt = "hi", profile = "default" })
-    t.truthy(res.ok, "request served by the static fallback")
-    t.eq(res.chosen.provider_id, "slow", "static provider served")
+    t.truthy(res.ok, "request served by the static fallback on the default success_rate")
+    t.eq(res.chosen.provider_id, "slow", "static provider served (engine seed ignored)")
 end)

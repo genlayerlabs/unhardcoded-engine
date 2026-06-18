@@ -178,13 +178,10 @@ t.test("legacy string-shaped disabled entry does not crash (at_ms treated as 0)"
     t.truthy(ps2.providers.p1.disabled == nil, "legacy disable expires after TTL")
 end)
 
-t.test("per-model EMA metrics and credits are surfaced", function()
+t.test("per-model price + credits are surfaced (reliability is host-owned)", function()
     reset()
-    -- seed a live EMA slot and a credits slot the way the engine/seeding does
+    -- seed a price slot and a credits slot the way seeding does
     r.runtime().ema_metrics[r.pm_key("p1", "m1")] = {
-        success_rate_ewma = 0.9,
-        ema_latency_ms    = 123,
-        n                 = 5,
         price_in          = 0.05,
         price_out         = 0.10,
         last_quality_eval = 0.8,
@@ -196,12 +193,12 @@ t.test("per-model EMA metrics and credits are surfaced", function()
     t.eq(p1.credits_remaining_usd, 4.2, "credits read from __credits slot")
     local mm = p1.models.m1
     t.truthy(mm, "per-model block present")
-    t.eq(mm.success_rate, 0.9, "success_rate surfaced")
-    t.eq(mm.avg_latency_ms, 123, "avg_latency_ms surfaced")
-    t.eq(mm.observations, 5, "observations surfaced")
     t.eq(mm.price_in, 0.05, "price_in surfaced")
     t.eq(mm.price_out, 0.10, "price_out surfaced")
     t.eq(mm.last_quality_eval, 0.8, "last_quality_eval surfaced")
+    -- reliability/latency are NOT engine-surfaced anymore (host-owned)
+    t.truthy(mm.success_rate == nil, "success_rate not engine-surfaced")
+    t.truthy(mm.avg_latency_ms == nil, "avg_latency not engine-surfaced")
     -- __credits slot must NOT leak into models
     t.truthy(p1.models["p1"] == nil, "credits slot not treated as a model")
 end)
