@@ -36,7 +36,7 @@ local CATALOG = {
 -- Mutable runtime state. dump_state/restore_state work on this.
 local RUNTIME = {
     circuit_breakers   = {},  -- [provider_id] = { open, opened_at_ms, consecutive_failures }
-    ema_metrics        = {},  -- [provider_id .. "|" .. model_family] = { ema_latency_ms, success_rate_ewma, n }
+    ema_metrics        = {},  -- [provider_id .. "|" .. model_family] = { price_in, price_out, last_quality_eval }; reliability is host-owned (#15)
     disabled_providers = {},  -- [provider_id] = { kind = error_kind, at_ms } (legacy: reason_string)
     discovery_cache    = {},  -- [discovery_id] = { offers, fetched_at_ms }
     initialized        = false,
@@ -49,7 +49,6 @@ local DEFAULTS = {
     circuit_breaker_failure_ms      = 5 * 60 * 1000,
     disable_provider_ttl_ms         = 5 * 60 * 1000,
     discovery_cache_ttl_ms          = 60 * 1000,
-    ema_alpha                       = 0.2,
     free_credit_threshold_usd       = 1.0,
 }
 
@@ -291,7 +290,7 @@ end
 
 function M.update_metrics(provider_id, model_family, delta)
     local k = pm_key(provider_id, model_family)
-    local cur = RUNTIME.ema_metrics[k] or { n = 0 }
+    local cur = RUNTIME.ema_metrics[k] or {}
     for kk, vv in pairs(delta) do cur[kk] = vv end
     RUNTIME.ema_metrics[k] = cur
 end

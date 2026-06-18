@@ -13,8 +13,7 @@
 --
 -- ctx shape consumed here:
 --   ctx.request = contract (requirements-bearing fields)
---   ctx.state.ema[pm_key]                = { ema_latency_ms, last_quality_eval,
---                                            price_in, price_out, ema_tok_s }
+--   ctx.state.ema[pm_key]                = { last_quality_eval, price_in, price_out }
 --   ctx.state.credits[provider_id]       = remaining_usd
 --   ctx.state.free_credit_threshold_usd  = number
 --   ctx.seed                             = integer | nil
