@@ -195,3 +195,32 @@ t.test("check: chain entries are closed records (identity stays injective)", fun
     sort, err = T.check({ "chain", { { provider = "p1", model = "m1", note = "x" } } })
     t.falsy(sort, "extra record key in a chain entry is rejected")
 end)
+
+-- §4.1 canonical exponent. The golden vectors only carry ALREADY-canonical
+-- exponents, and a 2-digit-printf libc (glibc/macOS) emits canonical form
+-- straight from %.17g — so encode()/golden alone can't catch a regression of
+-- the normalization there. Test the normalizer directly on the non-canonical
+-- forms a 3-digit/odd libc (e.g. MSVC "e-005") would produce.
+t.test("encode: exponent is normalized to canonical e±dd (SIGMA-POL §4.1)", function()
+    local ne = T._normalize_exp
+    t.eq(ne("1e-005"), "1e-05", "MSVC 3-digit exponent collapses")
+    t.eq(ne("1E-05"),  "1e-05", "uppercase E lowercased")
+    t.eq(ne("1e-5"),   "1e-05", "single-digit exponent padded to two")
+    t.eq(ne("1e+017"), "1e+17", "3-digit positive exponent stripped")
+    t.eq(ne("1e5"),    "1e+05", "missing sign inserted")
+    t.eq(ne("1.0000000000000001e-05"), "1.0000000000000001e-05", "canonical is idempotent")
+    t.eq(ne("1e+100"), "1e+100", "3 digits kept when the exponent needs them")
+    t.eq(ne("-2.5e-10"), "-2.5e-10", "mantissa sign preserved")
+    t.eq(ne("0.5"), "0.5", "non-exponent string untouched")
+    t.eq(ne("200000"), "200000", "integer string untouched")
+end)
+
+-- Integration: exponent-range params round-trip through the full encoder to
+-- canonical bytes (also a strong guard on any 3-digit-printf CI job).
+t.test("encode: exponent-range number params encode canonically", function()
+    local pol = { "policy", { "ev_zero" },
+        { "and", { "meets_req" }, { "cmp", "price_out", "le", 1e-5 } },
+        { "neg", { "normalize", { "field", "price_out" } } },
+        { "argmax" }, { "id" }, { "always", { action = "next_candidate" } } }
+    t.contains(enc(pol), "1.0000000000000001e-05", "tiny price ceiling encodes canonically")
+end)
