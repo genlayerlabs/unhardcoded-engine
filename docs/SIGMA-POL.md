@@ -129,14 +129,20 @@ Defaults are conservative by design: a candidate with no declared price does
 the IR pins the strict reading). Tier order defaults to
 `fallback < marketplace < partner` and is declarable (`config.tier_order`).
 
-The categorical candidate attributes `tier` (`tier_eq`, `min_tier`) and
-`model_family` (`family_eq`) are observed directly off the candidate, not
-through the Num/Bool field schema — they carry no numeric default and need no
-declaration. `family_eq` is the single-family identity test; a *set* of
-families is the algebra's `or` of `family_eq` (the `family_in` surface sugar
-lowers to exactly that), so "the cheapest among {A, B, C}" is
-`or(family_eq A, family_eq B, family_eq C)` as the filter with a
+The categorical candidate attributes `tier` (`tier_eq`, `min_tier`),
+`model_family` (`family_eq`) and `provider_id` (`provider_eq`) are observed
+directly off the candidate, not through the Num/Bool field schema — they carry
+no numeric default and need no declaration. `family_eq` is the single-family
+identity test; a *set* of families is the algebra's `or` of `family_eq` (the
+`family_in` surface sugar lowers to exactly that), so "the cheapest among
+{A, B, C}" is `or(family_eq A, family_eq B, family_eq C)` as the filter with a
 `neg(normalize(field("price_in")))` scorer.
+
+`provider_eq` is the same identity test over the provider id, for routing by
+*who serves* rather than *what model*: restrict to a set of providers with
+`or(provider_eq A, provider_eq B)` (sugar: `provider_in`), or disable one with
+`not(provider_eq X)` (sugar: `provider_not_in`) — e.g. drop a marketplace
+provider while keeping the rest of the catalog.
 
 ### 3.1 Population-relative selection lives in the data, not the ops
 

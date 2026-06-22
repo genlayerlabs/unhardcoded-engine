@@ -22,6 +22,14 @@ t.test("filter atoms lower to field observations", function()
         "family_in lowers to or(family_eq), like tier_in")
     t.eq(enc(E.filter({ family_in = { "gpt-5.5" } })), enc({ "family_eq", "gpt-5.5" }),
         "singleton family_in collapses to a single family_eq")
+    t.eq(enc(E.filter({ provider_in = { "openrouter", "codex" } })),
+         enc({ "or", { "provider_eq", "openrouter" }, { "provider_eq", "codex" } }),
+        "provider_in lowers to or(provider_eq), like family_in")
+    t.eq(enc(E.filter({ provider_in = { "openrouter" } })), enc({ "provider_eq", "openrouter" }),
+        "singleton provider_in collapses to a single provider_eq")
+    t.eq(enc(E.filter({ provider_not_in = { "antseed" } })),
+         enc({ "not", { "provider_eq", "antseed" } }),
+        "provider_not_in lowers to not(or(provider_eq)) — disable a provider")
     t.eq(enc(E.filter({ "requirements", { tier_in = { "partner" } } })),
          enc({ "and", { "meets_req" }, { "tier_eq", "partner" } }),
         "bare list = all_of; singleton tier_in collapses")

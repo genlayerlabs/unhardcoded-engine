@@ -37,6 +37,7 @@ S.OP_SORTS = {
 --   BoolField  declared field of sort Bool (schema-checked)
 --   Tier       tier name present in the schema's tier order
 --   Family     model-family name (open namespace, string)
+--   Provider   provider id (open namespace, string)
 --   Capability capability name (open namespace, string)
 --   ParamName  request parameter name (string)
 --   Scalar     number | string | boolean
@@ -63,6 +64,7 @@ S.ops = {
     tier_eq       = { out = "Pred", ins = { "Tier" } },
     min_tier      = { out = "Pred", ins = { "Tier" } },
     family_eq     = { out = "Pred", ins = { "Family" } },    -- model-family identity (or-compose for a set)
+    provider_eq   = { out = "Pred", ins = { "Provider" } },  -- provider-id identity (or-compose for a set; not() to exclude)
     has_cap       = { out = "Pred", ins = { "Capability" } },
 
     -- Scorer — semimodule over Num; population-relative (normalize) ------
