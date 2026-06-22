@@ -111,6 +111,25 @@ add{ name = "pred-family-set", kind = "pred",
            note = "not in the set -> or fails" },
      } }
 
+-- 5c. Pred: provider-id membership and exclusion — provider_in lowers to
+-- or(provider_eq); provider_not_in to not(or(provider_eq)). Routing by who
+-- serves: "only these providers" / "drop this provider" (e.g. a marketplace).
+add{ name = "pred-provider-set", kind = "pred",
+     term = { "or", { "provider_eq", "openrouter" }, { "provider_eq", "codex" } },
+     cases = {
+         { candidate = cand{ provider_id = "openrouter" }, ctx = CTX, note = "in the set" },
+         { candidate = cand{ provider_id = "codex" }, ctx = CTX, note = "in the set" },
+         { candidate = cand{ provider_id = "antseed" }, ctx = CTX,
+           note = "not in the set -> or fails" },
+     } }
+
+add{ name = "pred-provider-excluded", kind = "pred",
+     term = { "not", { "provider_eq", "antseed" } },
+     cases = {
+         { candidate = cand{ provider_id = "antseed" }, ctx = CTX, note = "excluded provider" },
+         { candidate = cand{ provider_id = "openrouter" }, ctx = CTX, note = "survives exclusion" },
+     } }
+
 -- 6. Policy decision: argmax over a gated, weighted scorer
 add{ name = "policy-argmax-gate", kind = "policy",
      term = { "policy",

@@ -75,6 +75,15 @@ t.test("check: family_eq admits a family name; or-composes into a set", function
     t.falsy(sort); t.contains(err, "string (Family)")
 end)
 
+t.test("check: provider_eq admits a provider id; or-composes; not() excludes", function()
+    t.eq(T.check({ "provider_eq", "antseed" }), "Pred", "a provider id admits")
+    t.eq(T.check({ "or", { "provider_eq", "openrouter" }, { "provider_eq", "codex" } }),
+         "Pred", "or of provider_eq is the provider-set filter")
+    t.eq(T.check({ "not", { "provider_eq", "antseed" } }), "Pred", "not() excludes a provider")
+    local sort, err = T.check({ "provider_eq", 7 })           -- non-string provider
+    t.falsy(sort); t.contains(err, "string (Provider)")
+end)
+
 t.test("check: top_k wraps an inner selector with a numeric k", function()
     t.eq(T.check({ "top_k", 3, { "argmax" } }), "Selector", "top_k(k, argmax) admits")
     t.eq(T.check({ "top_k", 5, { "sample", 0.5 } }), "Selector", "top_k over sample admits")
