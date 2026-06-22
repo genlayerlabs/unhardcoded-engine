@@ -20,5 +20,5 @@ backends. It exists to show the embedding contract:
 
 For the real host — async OpenAI-compatible shim, the auth resolver
 (`none`/`bearer`/`oauth`), Codex (ChatGPT subscription), AntSeed — see the
-**subzero LLM host** repo. Embedding in Rust (mlua, GenVM) is the same contract;
+**unhardcoded host** repo. Embedding in Rust (mlua, GenVM) is the same contract;
 see `genvm/dispatch.lua` for the on-chain adapter.

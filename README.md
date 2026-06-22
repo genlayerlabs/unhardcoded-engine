@@ -1,4 +1,4 @@
-# llm_policy
+# unhardcoded-engine
 
 A small, embeddable **policy algebra for LLM provider selection**, in pure Lua.
 You describe *what you need from an LLM call* (a contract); a **policy** —
@@ -15,7 +15,7 @@ The four verbs (see [`docs/POLICY_DESIGN.md`](./docs/POLICY_DESIGN.md)):
 
 Two consumers, one language:
 
-- **Off-chain (subzero ecosystem)** — a policy that *converges* on the best
+- **Off-chain (agent fleets)** — a policy that *converges* on the best
   available provider: resilience + cost optimization for an agent fleet.
 - **On-chain (GenVM greyboxing)** — each validator writes its own policy; the
   ease of writing 1000 *different* policies, over a well-defined provider object,
@@ -81,7 +81,7 @@ if result.ok then print(result.response.text) else print(result.error) end
 This repo **is** the core (sealed): pure Lua + a minimal embedding reference
 (`example_host/`) + the on-chain adapter overlay (`genvm/`). The production
 off-chain host moved to its own repo,
-[`genlayerlabs/llm-policy-host`](https://github.com/genlayerlabs/llm-policy-host).
+[`genlayerlabs/unhardcoded`](https://github.com/genlayerlabs/unhardcoded).
 The core never references a host — hosts import the core.
 
 ```
@@ -111,9 +111,9 @@ genvm/                     -- on-chain greybox adapter overlay (dispatch.lua + i
   core, install the `host` table, `init`, `execute`. The "hello world" of
   embedding `llm_policy`.
 - **Off-chain production host** —
-  [`genlayerlabs/llm-policy-host`](https://github.com/genlayerlabs/llm-policy-host):
+  [`genlayerlabs/unhardcoded`](https://github.com/genlayerlabs/unhardcoded):
   the async OpenAI-compatible shim + Codex (ChatGPT subscription) + AntSeed + the
-  auth resolver, serving the subzero agent ecosystem. It vendors this core as a
+  auth resolver, serving agent fleets. It vendors this core as a
   git submodule.
 - **On-chain adapter** — [`genvm/dispatch.lua`](./genvm/): a drop-in for
   genlayer-node's `genvm-llm-greybox.lua` that routes greyboxing through the

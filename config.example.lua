@@ -1,5 +1,5 @@
 -- config.example.lua
--- Example configuration for llm-router. Copy to `config.lua` and edit.
+-- Example configuration for unhardcoded-engine. Copy to `config.lua` and edit.
 -- See docs/POLICY_DESIGN.md §4 (the candidate object) for the schema.
 
 return {

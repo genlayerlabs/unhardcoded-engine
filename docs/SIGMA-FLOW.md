@@ -167,9 +167,9 @@ prompts, which policies, which topology), which is what its identity commits to.
 
 ## 6. Host vs core
 
-Core (`llm-policy`) owns the **IR**: `flow.check / normalize / encode /
+Core (`unhardcoded-engine`) owns the **IR**: `flow.check / normalize / encode /
 fingerprint / run`. It holds no data and makes no calls. The host
-(`llm-policy-host`) owns the **effects and the surface**:
+(`unhardcoded`) owns the **effects and the surface**:
 
 - `run_node(node, prompt)` ↦ `router.execute{ prompt = prompt, system =
   node.system, policy_ir = node.policy }` — every node call flows through the

@@ -8,7 +8,7 @@ pure core delegates), init a catalog, run `execute`, print the decision + trace.
 This is a *teaching reference*, not a production host: the call_provider is a
 mock (no real HTTP, no auth, no async, no provider-specific backends). For the
 real host — async OpenAI-compatible shim, the auth resolver (none/bearer/oauth),
-Codex/AntSeed — see the subzero LLM host repo.
+Codex/AntSeed — see the unhardcoded host repo.
 
 Run:
     nix-shell -p 'python3.withPackages(ps:[ps.lupa])' \

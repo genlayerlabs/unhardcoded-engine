@@ -382,7 +382,7 @@ The host owns everything the core excludes:
 
 Three artifacts, this is the first: **`llm_policy` (the algebra)**, the **GenVM
 greybox host** (on-chain interpreter + Rust filters + seed from tx/node), and
-the **subzero LLM host** (off-chain interpreter + credentials + agent layer).
+the **unhardcoded host** (off-chain interpreter + credentials + agent layer).
 
 ## 10. Migration from `router.lua`
 
