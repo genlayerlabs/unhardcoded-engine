@@ -66,6 +66,16 @@ function E.filter(spec)
             for _, f in ipairs(spec.family_in) do out[#out + 1] = { "family_eq", f } end
             return #out == 2 and out[2] or out
         end
+        if spec.provider_in then           -- keep only these providers
+            local out = { "or" }
+            for _, p in ipairs(spec.provider_in) do out[#out + 1] = { "provider_eq", p } end
+            return #out == 2 and out[2] or out
+        end
+        if spec.provider_not_in then       -- drop these providers (e.g. disable antseed)
+            local out = { "or" }
+            for _, p in ipairs(spec.provider_not_in) do out[#out + 1] = { "provider_eq", p } end
+            return { "not", #out == 2 and out[2] or out }
+        end
         -- (sigma-pol/v2) quality_min/quality_max removed with the `quality`
         -- field: it denoted no observable (hand-assigned hint / uncomputed eval).
         -- Gate on a real field instead (e.g. price/latency/context).

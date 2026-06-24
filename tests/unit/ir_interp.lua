@@ -65,6 +65,18 @@ t.test("family_eq matches the candidate's model family; or builds a set", functi
     t.falsy(set(cand({ model_family = "mZ" }), ctx()), "mZ is not in the set")
 end)
 
+t.test("provider_eq matches the candidate's provider id; or builds a set, not() excludes", function()
+    t.truthy(ev({ "provider_eq", "p1" })(cand(), ctx()), "p1 == p1")
+    local ok, why = ev({ "provider_eq", "p9" })(cand(), ctx())
+    t.falsy(ok); t.contains(why, "provider_id")
+    -- "only openrouter+openai" rests on the provider set = or(provider_eq, provider_eq)
+    local set = ev({ "or", { "provider_eq", "p1" }, { "provider_eq", "p2" } })
+    t.truthy(set(cand(), ctx()), "p1 is in the set")
+    t.falsy(set(cand({ provider_id = "pZ" }), ctx()), "pZ is not in the set")
+    -- not(provider_eq) excludes a provider (e.g. drop the slow marketplace)
+    t.falsy(ev({ "not", { "provider_eq", "p1" } })(cand(), ctx()), "not(p1) excludes p1")
+end)
+
 t.test("boolean structure: and short-circuits with reason, not inverts", function()
     local p = ev({ "and", { "tier_eq", "partner" }, { "cmp", "context", "ge", 1e9 } })
     local ok, why = p(cand(), ctx())

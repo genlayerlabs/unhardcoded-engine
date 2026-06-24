@@ -187,6 +187,13 @@ function I.default_algebra(opts)
             return false, "model_family"
         end
     end
+    alg.provider_eq = function(a)
+        local provider = a[1]
+        return function(cand, _ctx)
+            if cand.provider_id == provider then return true end
+            return false, "provider_id"
+        end
+    end
     alg.has_cap = function(a)
         local cap = a[1]
         return function(cand, _ctx)
