@@ -85,3 +85,39 @@ t.test("marketplace candidates carry offer prices into filtering", function()
     t.eq(mkt_endpoints["http://mkt2"], 0.1, "cheap offer survives with its price")
     t.falsy(mkt_endpoints["http://mkt"], "over-ceiling offer filtered out")
 end)
+
+t.test("marketplace offer prices win over provider-family metrics when scoring", function()
+    r.reset()
+    host = {
+        log = function() end, env = function() return nil end,
+        now_ms = function() return 0 end, sleep_ms = function() end,
+        discover = function(id)
+            return { ok = true, fetched_at_ms = 0, offers = {
+                { model_family = "m1", seller_endpoint = "http://expensive-offer",
+                  quality_hint = 0.7,
+                  price_in_usd_per_mtok = 9.0, price_out_usd_per_mtok = 9.0 },
+                { model_family = "m1", seller_endpoint = "http://cheap-offer",
+                  quality_hint = 0.7,
+                  price_in_usd_per_mtok = 0.1, price_out_usd_per_mtok = 0.1 },
+            } }
+        end,
+    }
+    assert(router.init(config_with_price_ceiling(), METRICS))
+    router.update_metrics("market_p", "m1", { price_in = 42.0, price_out = 42.0 })
+
+    local ranked = router.rank({
+        policy_ir = { "policy",
+            { "provider_eq", "market_p" },
+            { "neg", { "normalize", { "field", "price_in" } } },
+            { "argmax" },
+            { "id" },
+            { "always", { action = "next_candidate" } },
+        },
+    })
+
+    t.eq(#ranked, 2, "both marketplace offers survive")
+    t.eq(ranked[1].candidate.base_url, "http://cheap-offer",
+        "cheapest offer ranks first even when provider-family metrics disagree")
+    t.eq(ranked[1].candidate.price_in, 0.1, "candidate keeps its offer price")
+    t.truthy(ranked[1].score > ranked[2].score, "offer prices produce different scores")
+end)
