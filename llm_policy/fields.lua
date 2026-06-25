@@ -33,12 +33,14 @@ Fl.CORE = {
     price_in = { sort = "Num", default = math.huge, source = "state|catalog",
         get = function(c, ctx)
             local m = ema_of(c, ctx)
-            return (m and m.price_in) or c.price_in
+            if c.price_in ~= nil then return c.price_in end
+            return m and m.price_in
         end },
     price_out = { sort = "Num", default = math.huge, source = "state|catalog",
         get = function(c, ctx)
             local m = ema_of(c, ctx)
-            return (m and m.price_out) or c.price_out
+            if c.price_out ~= nil then return c.price_out end
+            return m and m.price_out
         end },
     -- (sigma-pol/v2) `quality` and `quality_hint` were REMOVED: neither denotes
     -- an observable. `last_quality_eval` is never computed (the committed
