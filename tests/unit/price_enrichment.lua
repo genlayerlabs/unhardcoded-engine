@@ -86,6 +86,40 @@ t.test("marketplace candidates carry offer prices into filtering", function()
     t.falsy(mkt_endpoints["http://mkt"], "over-ceiling offer filtered out")
 end)
 
+t.test("served_model_id is the offer's wire id, falling back to the family", function()
+    r.reset()
+    host = {
+        log = function() end, env = function() return nil end,
+        now_ms = function() return 0 end, sleep_ms = function() end,
+        discover = function(id)
+            return { ok = true, fetched_at_ms = 0, offers = {
+                -- provider-neutral family + a distinct raw wire slug
+                { model_family = "m1", wire_model_id = "vendor/m1",
+                  seller_endpoint = "http://with-wire",
+                  quality_hint = 0.7,
+                  price_in_usd_per_mtok = 0.1, price_out_usd_per_mtok = 0.1 },
+                -- no wire_model_id: the family IS the wire id (back-compat)
+                { model_family = "m1", seller_endpoint = "http://no-wire",
+                  quality_hint = 0.7,
+                  price_in_usd_per_mtok = 0.2, price_out_usd_per_mtok = 0.2 },
+            } }
+        end,
+    }
+    assert(router.init(config_with_price_ceiling(), METRICS))
+    local ranked = router.rank({ prompt = "x", profile = "default" })
+    local served = {}
+    for _, row in ipairs(ranked) do
+        if row.candidate.provider_id == "market_p" then
+            served[row.candidate.base_url] = row.candidate.served_model_id
+        end
+    end
+    -- the policy-facing family stays neutral, the wire id is the slug
+    t.eq(served["http://with-wire"], "vendor/m1",
+        "served_model_id is the offer's wire_model_id when present")
+    t.eq(served["http://no-wire"], "m1",
+        "served_model_id falls back to the family when no wire id (back-compat)")
+end)
+
 t.test("marketplace offer prices win over provider-family metrics when scoring", function()
     r.reset()
     host = {

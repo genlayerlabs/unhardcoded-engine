@@ -341,7 +341,14 @@ local function gather_marketplace_candidates(now_ms)
                     out[#out + 1] = {
                         provider_id     = pid,
                         model_family    = offer.model_family,
-                        served_model_id = offer.model_family,
+                        -- served_model_id is the WIRE id the host puts on the
+                        -- request, mirroring the static path's
+                        -- `served.provider_model_id` (candidate.lua). When an
+                        -- offer's policy-facing family differs from its wire id
+                        -- (a provider-neutral family + raw slug), wire_model_id
+                        -- carries the slug; absent it, the family IS the wire id
+                        -- (back-compatible — every offer predating the field).
+                        served_model_id = offer.wire_model_id or offer.model_family,
                         capabilities    = offer.capabilities or {},
                         quality_hint    = offer.quality_hint,
                         price_in        = offer.price_in_usd_per_mtok,
