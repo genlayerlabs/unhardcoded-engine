@@ -951,6 +951,10 @@ local function handle_response(state, response)
                 -- can stamp an executed cost on the request record
                 price_in        = cand.price_in,
                 price_out       = cand.price_out,
+                -- which route actually served the call: the marketplace peer,
+                -- or the provider itself for direct routes. The host attributes
+                -- the call to this per-route identity for per-route stats.
+                served_by       = cand.offer and cand.offer.peer_id or cand.provider_id,
             },
         })
     end

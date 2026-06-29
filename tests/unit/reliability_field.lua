@@ -90,6 +90,8 @@ t.test("selection runs on host-stamped reliability, pointwise (no engine fold)",
     local res = router.execute({ prompt = "hi", profile = "mkt" })
     t.truthy(res.ok, "request served")
     t.eq(res.chosen.provider_id, "mkt", "served by the marketplace provider")
+    t.eq(res.chosen.served_by, "routeGood",
+         "chosen names the route that served (the marketplace peer)")
     t.eq(CALLED[1], "routeGood",
          "pinned the route the host stamped most reliable (0.99 > 0.10), engine slot ignored")
 end)
@@ -107,4 +109,5 @@ t.test("an unstamped candidate uses the field default, not any engine EMA", func
     local res = router.execute({ prompt = "hi", profile = "default" })
     t.truthy(res.ok, "request served by the static fallback on the default success_rate")
     t.eq(res.chosen.provider_id, "slow", "static provider served (engine seed ignored)")
+    t.eq(res.chosen.served_by, "slow", "a direct route's served_by is the provider itself")
 end)
