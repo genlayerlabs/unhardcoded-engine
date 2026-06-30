@@ -363,6 +363,7 @@ local function gather_marketplace_candidates(now_ms)
                         has_tee         = p.has_tee or false,
                         no_log          = p.no_log or false,
                         base_url        = offer.seller_endpoint,
+                        aws_region      = p.aws_region,
                         auth_env        = p.auth_env,
                         auth            = p.auth,   -- opaque to the router; the host resolves it
                         api_kind        = p.api_kind,
@@ -732,6 +733,7 @@ local function build_request(cand, contract)
         model_family    = cand.model_family,
         served_model_id = cand.served_model_id,
         base_url        = cand.base_url,
+        aws_region      = cand.aws_region,
         api_kind        = cand.api_kind,
         auth_env        = cand.auth_env,
         auth            = cand.auth,

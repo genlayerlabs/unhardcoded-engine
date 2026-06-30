@@ -9,7 +9,8 @@ local C = {}
 
 local VALID_TIERS     = { partner = true, marketplace = true, fallback = true }
 local VALID_API_KIND  = { openai_compatible = true, openai_codex = true,
-                          anthropic = true, google = true, ollama = true }
+                          anthropic = true, google = true, bedrock = true,
+                          ollama = true }
 local VALID_PRIVACY   = { standard = true, no_log = true, tee_required = true }
 local VALID_DISCOVERY = { static = true, marketplace = true }
 
@@ -25,7 +26,7 @@ local function validate_provider(id, p)
         return "providers." .. id .. ".discovery_id required for discovery=marketplace"
     end
     if not VALID_API_KIND[p.api_kind] then
-        return "providers." .. id .. ".api_kind must be one of: openai_compatible, openai_codex, anthropic, google, ollama"
+        return "providers." .. id .. ".api_kind must be one of: openai_compatible, openai_codex, anthropic, google, bedrock, ollama"
     end
     if p.tier ~= nil and not VALID_TIERS[p.tier] then
         return "providers." .. id .. ".tier must be one of: partner, marketplace, fallback"
@@ -104,6 +105,7 @@ function C.build_candidate_matrix(providers, models)
                     has_tee          = p.has_tee or false,
                     no_log           = p.no_log or false,
                     base_url         = p.base_url,
+                    aws_region       = p.aws_region,
                     auth_env         = p.auth_env,
                     auth             = p.auth,   -- opaque to the router; the host resolves it
                     api_kind         = p.api_kind,
