@@ -155,3 +155,78 @@ t.test("marketplace offer prices win over provider-family metrics when scoring",
     t.eq(ranked[1].candidate.price_in, 0.1, "candidate keeps its offer price")
     t.truthy(ranked[1].score > ranked[2].score, "offer prices produce different scores")
 end)
+
+t.test("static prices apply host multiplier at rank time and keep raw price", function()
+    r.reset()
+    local mult = 0.5
+    host = {
+        log = function() end, env = function() return nil end,
+        now_ms = function() return 0 end, sleep_ms = function() end,
+        price_multiplier = function(provider_id, _source_name)
+            if provider_id == "cheap_p" then return mult end
+            return 1.0
+        end,
+    }
+    assert(router.init(config_with_price_ceiling(), METRICS))
+
+    local term = { "policy",
+        { "provider_eq", "cheap_p" },
+        { "neg", { "normalize", { "field", "price_in" } } },
+        { "argmax" },
+        { "id" },
+        { "always", { action = "next_candidate" } },
+    }
+    local ranked = router.rank({ policy_ir = term })
+    local c = ranked[1].candidate
+    t.eq(c.raw_price_in, 0.5, "raw input price stays from metrics")
+    t.eq(c.raw_price_out, 2.0, "raw output price stays from metrics")
+    t.eq(c.price_in, 0.25, "ranking input price uses multiplier")
+    t.eq(c.price_out, 1.0, "ranking output price uses multiplier")
+    t.eq(c.price_multiplier, 0.5, "candidate carries multiplier used")
+
+    mult = 2.0
+    ranked = router.rank({ policy_ir = term })
+    c = ranked[1].candidate
+    t.eq(c.raw_price_in, 0.5, "raw price is unchanged after multiplier changes")
+    t.eq(c.price_in, 1.0, "new multiplier applies without updating metrics")
+    t.eq(c.price_multiplier, 2.0, "candidate carries new multiplier")
+end)
+
+t.test("marketplace prices apply source multiplier at rank time and keep raw offer", function()
+    r.reset()
+    local cfg = config_with_price_ceiling()
+    cfg.providers.market_p.source = "market_source"
+    host = {
+        log = function() end, env = function() return nil end,
+        now_ms = function() return 0 end, sleep_ms = function() end,
+        price_multiplier = function(provider_id, source_name)
+            if provider_id == "market_p" and source_name == "market_source" then
+                return 0.25
+            end
+            return 1.0
+        end,
+        discover = function(id)
+            return { ok = true, fetched_at_ms = 0, offers = {
+                { model_family = "m1", seller_endpoint = "http://mkt",
+                  quality_hint = 0.7,
+                  price_in_usd_per_mtok = 0.8, price_out_usd_per_mtok = 4.0 },
+            } }
+        end,
+    }
+    assert(router.init(cfg, METRICS))
+    local ranked = router.rank({
+        policy_ir = { "policy",
+            { "provider_eq", "market_p" },
+            { "neg", { "normalize", { "field", "price_in" } } },
+            { "argmax" },
+            { "id" },
+            { "always", { action = "next_candidate" } },
+        },
+    })
+    local c = ranked[1].candidate
+    t.eq(c.raw_price_in, 0.8, "raw marketplace input price stays on candidate")
+    t.eq(c.raw_price_out, 4.0, "raw marketplace output price stays on candidate")
+    t.eq(c.price_in, 0.2, "ranking price uses source multiplier")
+    t.eq(c.price_out, 1.0, "ranking output price uses source multiplier")
+    t.eq(c.offer.price_in_usd_per_mtok, 0.8, "cached offer stays raw")
+end)

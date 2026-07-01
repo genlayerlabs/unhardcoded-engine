@@ -12,7 +12,7 @@
 -- The host must provide a `host` global with at least:
 --   call_provider, now_ms, env, log
 -- and optionally:
---   discover, sleep_ms, persist_state, load_state
+--   discover, price_multiplier, sleep_ms, persist_state, load_state
 --
 -- This file does no I/O. The host owns all of it.
 
@@ -72,6 +72,43 @@ end
 
 local function clock()
     return (host and host.now_ms and host.now_ms()) or 0
+end
+
+local function price_multiplier(provider_id, source_name)
+    if host and host.price_multiplier then
+        local ok, mult = pcall(host.price_multiplier, provider_id, source_name)
+        if ok and type(mult) == "number" and mult > 0 then
+            return mult
+        end
+    end
+    return 1.0
+end
+
+local function ranking_price(raw, mult)
+    if raw == nil then return nil end
+    return raw * mult
+end
+
+local function apply_ranking_prices(c, source_name)
+    local raw_in = c.raw_price_in
+    if raw_in == nil then raw_in = c.price_in end
+    local raw_out = c.raw_price_out
+    if raw_out == nil then raw_out = c.price_out end
+    if raw_in == nil and raw_out == nil then return c end
+
+    local mult = c.price_multiplier
+    if type(mult) ~= "number" or mult <= 0 then
+        mult = price_multiplier(c.provider_id, source_name)
+    end
+
+    local e = {}
+    for k, v in pairs(c) do e[k] = v end
+    e.raw_price_in = raw_in
+    e.raw_price_out = raw_out
+    e.price_multiplier = mult
+    e.price_in = ranking_price(raw_in, mult)
+    e.price_out = ranking_price(raw_out, mult)
+    return e
 end
 
 -- ===========================================================================
@@ -338,7 +375,7 @@ local function gather_marketplace_candidates(now_ms)
             for _, offer in ipairs(offers or {}) do
                 -- skip expired quotes
                 if not offer.expires_at_ms or offer.expires_at_ms > now_ms then
-                    out[#out + 1] = {
+                    out[#out + 1] = apply_ranking_prices({
                         provider_id     = pid,
                         model_family    = offer.model_family,
                         -- served_model_id is the WIRE id the host puts on the
@@ -351,15 +388,10 @@ local function gather_marketplace_candidates(now_ms)
                         served_model_id = offer.wire_model_id or offer.model_family,
                         capabilities    = offer.capabilities or {},
                         quality_hint    = offer.quality_hint,
-                        -- Raw marketplace quote stays on `offer`; the host may
-                        -- add effective prices for ranking-only provider
-                        -- multipliers (credits/risk/surcharge). Static routes
-                        -- get the same treatment through ema_metrics.
-                        price_in        = offer.effective_price_in_usd_per_mtok
-                                          or offer.price_in_usd_per_mtok,
-                        price_out       = offer.effective_price_out_usd_per_mtok
-                                          or offer.price_out_usd_per_mtok,
-                        price_multiplier = offer.ranking_price_multiplier,
+                        raw_price_in    = offer.price_in_usd_per_mtok,
+                        raw_price_out   = offer.price_out_usd_per_mtok,
+                        price_in        = offer.price_in_usd_per_mtok,
+                        price_out       = offer.price_out_usd_per_mtok,
                         -- host-measured reliability/perf for THIS route, stamped
                         -- on the offer like price; observed pointwise by the
                         -- algebra (fields.lua), which needs no notion of route.
@@ -376,7 +408,7 @@ local function gather_marketplace_candidates(now_ms)
                         api_kind        = p.api_kind,
                         discovery       = "marketplace",
                         offer           = offer,   -- forwarded to host.call_provider
-                    }
+                    }, p.source or p.discovery_id)
                 end
             end
         end
@@ -665,17 +697,17 @@ end
 
 -- Filters see raw candidates (pol.plan), but prices live in the metrics
 -- store — so price ceilings were no-ops on static candidates. Enrich at
--- plan time: fill nil price fields from ema_metrics (marketplace
--- candidates already carry their offer's prices, which win).
+-- plan time: fill nil price fields from ema_metrics, then apply the live host
+-- ranking multiplier without mutating the raw stored price.
 local function enrich_with_prices(c)
-    if c.price_in ~= nil and c.price_out ~= nil then return c end
     local m = RUNTIME.ema_metrics[pm_key(c.provider_id, c.model_family)]
-    if not m or (m.price_in == nil and m.price_out == nil) then return c end
     local e = {}
     for k, v in pairs(c) do e[k] = v end
-    if e.price_in  == nil then e.price_in  = m.price_in  end
-    if e.price_out == nil then e.price_out = m.price_out end
-    return e
+    if m then
+        if e.price_in  == nil then e.price_in  = m.price_in  end
+        if e.price_out == nil then e.price_out = m.price_out end
+    end
+    return apply_ranking_prices(e)
 end
 
 -- Resolve the plan for a contract. Returns ordered, err, rejected, policy, ctx;
@@ -960,6 +992,8 @@ local function handle_response(state, response)
                 -- can stamp an executed cost on the request record
                 price_in        = cand.price_in,
                 price_out       = cand.price_out,
+                raw_price_in    = cand.raw_price_in,
+                raw_price_out   = cand.raw_price_out,
                 price_multiplier = cand.price_multiplier,
                 -- which route actually served the call: the marketplace peer,
                 -- or the provider itself for direct routes. The host attributes
