@@ -44,7 +44,7 @@ delegates every side effect to it:
 The core decides *which provider, when to retry, when to abort*; the host
 *executes* the call and resolves auth from the provider's declared
 `auth = {kind="none"|"bearer"|"oauth"}`. The minimal working reference is
-`example_host/example.py` (~80 lines, lupa + a mock provider) — read it before
+`example_host/example.py` (~96 lines, lupa + a mock provider) — read it before
 writing your own. mlua (Rust/GenVM) and luerl (Elixir) embed the same way.
 
 **Public surface** (all on the `llm_policy` module):
@@ -67,8 +67,9 @@ moments, field mutability) is `docs/POLICY_DESIGN.md`.
 ## B. Authoring a Σ_pol policy term
 
 A policy is **data** — a plain array over the closed, versioned signature
-`sigma-pol/v2`, admitted before it runs (depth ≤ 64, ≤ 4096 nodes). Six slots;
-fill the three middle ones, keep the tail as defaults:
+`sigma-pol/v2`, admitted before it runs (depth ≤ 64, ≤ 4096 nodes). Five slots
+(the Evidence slot was removed in v2); fill the leading three — Pred, Scorer,
+Selector — and keep the tail (Xform, FailPlan) as defaults:
 
 ```
 ["policy", <Pred>, <Scorer>, <Selector>, <Xform>, <FailPlan>]
@@ -79,7 +80,7 @@ fill the three middle ones, keep the tail as defaults:
   `has_cap`.
 - **Scorer** — rank survivors (population-relative): `field(f)`, `lit`, `scale`,
   `add`, `neg`, `normalize`, `clamp`, `gate(pred, scorer)`.
-- **Selector** — pick: `argmax`, `ordered`, `sample(seed)`, `top_k`, `chain`.
+- **Selector** — pick: `argmax`, `ordered`, `sample(temp)`, `top_k`, `chain`.
 - **Xform** (default `["id"]`) — mutate the outgoing request per attempt.
 - **FailPlan** (default `["always", {"action":"next_candidate"}]`) — error_kind → Action.
 
