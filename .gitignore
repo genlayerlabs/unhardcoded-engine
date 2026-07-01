@@ -24,8 +24,9 @@ htmlcov/
 # Rust skeleton build artifacts
 hosts/rust/target/
 
-# Claude Code runtime state
-.claude/
+# Claude Code runtime state (sessions, todos, etc.) — but ship repo-provided skills
+.claude/*
+!.claude/skills/
 
 # Nix-build output symlinks (from genvm/runners-no-embeddings.nix etc.)
 result

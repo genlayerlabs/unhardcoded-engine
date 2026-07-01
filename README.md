@@ -56,7 +56,7 @@ deterministically (identity = sha256 of the encoding), and interpreted by a
 - **Policy identity:** canonical hash for caching, audit ("request X ran
   policy H"), and on-chain commitment; `trace.policy_fingerprint` on every run.
 - **Conformance as a checklist:** any host, in any language, that reproduces
-  the per-op semantics and replays `tests/golden/sigma_pol_v1.json`
+  the per-op semantics and replays `tests/golden/sigma_pol_v2.json`
   bit-for-bit computes the same decisions. Spec:
   [`docs/SIGMA-POL.md`](./docs/SIGMA-POL.md).
 
@@ -101,7 +101,7 @@ docs/
   GENVM-LLM-POLICY.md      -- using llm_policy as a node's greyboxing algebra
 example_host/              -- the minimal embedding reference (~80 lines, mock provider)
 tests/                     -- Lua unit tests (run_lua.lua, unit/, golden/)
-  golden/                  -- sigma_pol_v1.json conformance vectors + generator
+  golden/                  -- sigma_pol_v2.json conformance vectors + generator
 genvm/                     -- on-chain greybox adapter overlay (dispatch.lua + integrate.sh); tests/
 ```
 

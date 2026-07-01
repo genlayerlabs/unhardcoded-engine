@@ -357,7 +357,7 @@ lupa and assert identical `ordered` + `request'` + directives. On-chain
 divergence comes only from different `seed` / `catalog` / `state`, by design.
 
 The IR sharpens this from a property into an artifact: the executable spec is
-`tests/golden/sigma_pol_v1.json` (encodings, fingerprints, decisions —
+`tests/golden/sigma_pol_v2.json` (encodings, fingerprints, decisions —
 replayed bit-for-bit under lua5.4 and lupa), and initiality reduces
 conformance of any new interpreter to a finite per-op checklist
 (SIGMA-POL.md §7). The semantics use only correctly-rounded IEEE operations —

@@ -390,7 +390,7 @@ the only cross-host disagreement an extension can introduce is a term using an
 op the host lacks, which it rejects at admission (`unknown op`) — a refusal,
 never a divergent decision.
 
-The executable half is **`tests/golden/sigma_pol_v1.json`**: language-neutral
+The executable half is **`tests/golden/sigma_pol_v2.json`**: language-neutral
 vectors covering canonical encodings (including float formatting and AC
 sorting), fingerprints, Pred verdicts with reasons, full policy decisions
 (ordered/scores/rejected), seeded sampling, seeded Xforms, and FailPlan
