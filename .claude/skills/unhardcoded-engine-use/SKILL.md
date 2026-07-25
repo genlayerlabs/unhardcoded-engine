@@ -80,7 +80,9 @@ Selector — and keep the tail (Xform, FailPlan) as defaults:
   `has_cap`.
 - **Scorer** — rank survivors (population-relative): `field(f)`, `lit`, `scale`,
   `add`, `neg`, `normalize`, `clamp`, `gate(pred, scorer)`.
-- **Selector** — pick: `argmax`, `ordered`, `sample(temp)`, `top_k`, `chain`.
+- **Selector** — pick: `argmax`, `ordered`, `sample(temp)`, `top_k`, `chain`,
+  or `prefer(pred, inner)` for strict lexicographic priority while retaining
+  the inner order within each group.
 - **Xform** (default `["id"]`) — mutate the outgoing request per attempt.
 - **FailPlan** (default `["always", {"action":"next_candidate"}]`) — error_kind → Action.
 

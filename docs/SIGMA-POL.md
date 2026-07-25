@@ -339,6 +339,37 @@ speed Scorer; "the 5 best on benchmarks" is `top_k(5, argmax)` over a Scorer
 that sums the benchmark fields. It composes over any inner Selector (e.g.
 `top_k(3, sample(t))` shortlists a seeded draw).
 
+### 5.5 `prefer` — strict lexicographic priority
+
+`prefer(pred, inner)` runs `inner` once, then performs a **stable partition**:
+every candidate for which `pred(candidate, ctx)` is true comes before every
+candidate for which it is false. The relative order inside both partitions is
+exactly the order returned by `inner`; scores and score breakdowns are not
+changed, and no candidate is dropped.
+
+Nesting produces lexicographic priority without encoding hard precedence as
+arbitrary score weights. For example, this selector means Codex → AntSeed →
+Bedrock → OpenRouter, with the ordinary price score ordering routes inside
+each provider group:
+
+```lua
+{ "prefer", { "provider_eq", "openai_codex" },
+  { "prefer", { "provider_eq", "antseed" },
+    { "prefer",
+      { "or", { "provider_eq", "bedrock" },
+              { "provider_eq", "bedrock_market" } },
+      { "prefer",
+        { "or", { "provider_eq", "openrouter" },
+                { "provider_eq", "openrouter_market" } },
+        { "argmax" } } } } }
+```
+
+An outer `prefer(not(is("breaker_open")), ...)` makes health the first key:
+every healthy route precedes every open-breaker route, while the latter remain
+available as final fallbacks. Unlike `chain`, `prefer` does not require exact
+provider/model pairs and does not whitelist away the unmentioned tail. Use a
+filter composed from `provider_eq` when unmentioned providers must be excluded.
+
 ## 6. Using it
 
 ```lua
