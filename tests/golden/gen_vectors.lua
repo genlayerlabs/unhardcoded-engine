@@ -165,6 +165,16 @@ add{ name = "policy-top-k", kind = "policy",
          { "always", { action = "next_candidate" } } },
      candidates = POP, ctx = { request = { requirements = {} }, now_ms = 0 } }
 
+-- 8c. Policy decision: strict predicate priority, score order within groups.
+-- p2 has the same context score as p1/p3 but is breaker-open in CTX; prefer is
+-- deliberately independent of score and moves it first without rewriting it.
+add{ name = "policy-prefer-stable-partition", kind = "policy",
+     term = { "policy",
+         { "top" }, { "field", "context" },
+         { "prefer", { "provider_eq", "p2" }, { "argmax" } }, { "id" },
+         { "always", { action = "next_candidate" } } },
+     candidates = POP, ctx = CTX }
+
 -- 9. Xform: params, seed injection, clamping, per-param seeded jitter, directive
 add{ name = "xform-seq-seeded", kind = "xform",
      term = { "seq",

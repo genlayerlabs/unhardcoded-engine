@@ -175,6 +175,57 @@ t.test("chain selector whitelists and orders by priority", function()
     t.eq(out[2].candidate.provider_id, "p1")
 end)
 
+t.test("prefer is a strict stable partition over the inner selector", function()
+    local sel = ev({ "prefer", { "provider_eq", "p2" }, { "argmax" } })
+    local scored = {
+        { candidate = cand({ provider_id = "p1" }), score = 0.90, score_breakdown = {} },
+        { candidate = cand({ provider_id = "p2", served_model_id = "m1-a" }),
+          score = 0.10, score_breakdown = {} },
+        { candidate = cand({ provider_id = "p2", served_model_id = "m1-b" }),
+          score = 0.80, score_breakdown = {} },
+        { candidate = cand({ provider_id = "p3" }), score = 0.70, score_breakdown = {} },
+    }
+    local out = sel(scored, ctx())
+    t.eq(#out, 4, "prefer keeps the complete candidate set")
+    t.eq(out[1].candidate.served_model_id, "m1-b",
+        "preferred group is first and retains inner score order")
+    t.eq(out[2].candidate.served_model_id, "m1-a",
+        "lower-scored preferred candidate still precedes every non-match")
+    t.eq(out[3].candidate.provider_id, "p1",
+        "non-matches retain their inner score order")
+    t.near(out[1].score, 0.80, 1e-12, "prefer does not rewrite scores")
+end)
+
+t.test("nested prefer is lexicographic and composes with breaker health", function()
+    local providers = { "codex", "antseed", "bedrock", "openrouter", "other" }
+    local scores = { 0.10, 0.20, 0.90, 1.00, 0.95 }
+    local scored = {}
+    for i, provider in ipairs(providers) do
+        scored[i] = {
+            candidate = cand({ provider_id = provider }),
+            score = scores[i],
+            score_breakdown = {},
+        }
+    end
+    local provider_order = {
+        "prefer", { "provider_eq", "codex" },
+        { "prefer", { "provider_eq", "antseed" },
+          { "prefer", { "provider_eq", "bedrock" },
+            { "prefer", { "provider_eq", "openrouter" }, { "argmax" } } } },
+    }
+    local healthy_provider_order = ev({
+        "prefer", { "not", { "is", "breaker_open" } }, provider_order,
+    })
+    local c = ctx()
+    c.state.breakers = { codex = true }
+    local out = healthy_provider_order(scored, c)
+    local expected = { "antseed", "bedrock", "openrouter", "other", "codex" }
+    for i, provider in ipairs(expected) do
+        t.eq(out[i].candidate.provider_id, provider,
+            "lexicographic provider/health order @" .. i)
+    end
+end)
+
 t.test("top_k orders by the inner selector and keeps the first k", function()
     local pol = ir.compile({ "policy",
         { "top" }, { "field", "context" },

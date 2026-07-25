@@ -108,6 +108,14 @@ t.test("check: top_k wraps an inner selector with a numeric k", function()
     t.eq(T.check({ "top_k", 2.0, { "argmax" } }), "Selector", "an integer-valued float admits")
 end)
 
+t.test("check: prefer composes a predicate with an inner selector", function()
+    t.eq(T.check({ "prefer", { "provider_eq", "p1" }, { "argmax" } }),
+        "Selector", "prefer(pred, selector) admits")
+    local sort, err = T.check({ "prefer", { "argmax" }, { "provider_eq", "p1" } })
+    t.falsy(sort, "swapped prefer arguments are rejected")
+    t.contains(err, "expected Pred")
+end)
+
 t.test("normalize: AC flatten + sort makes order irrelevant", function()
     local a = { "cmp", "price_in", "le", 5 }
     local b = { "is", "has_tee" }

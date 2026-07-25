@@ -400,6 +400,32 @@ function I.default_algebra(opts)
             return out
         end
     end
+    -- prefer(pred, inner): run the inner selector once, then stably partition
+    -- its complete order into pred-matches followed by non-matches.  Scores and
+    -- breakdowns are untouched.  Nesting therefore gives real lexicographic
+    -- priority while preserving the inner score order inside every group:
+    --
+    --   prefer(codex, prefer(antseed, prefer(bedrock, argmax)))
+    --
+    -- Unlike chain, this neither requires exact (provider,model) pairs nor
+    -- drops the tail.  An outer prefer(not(breaker_open), ...) makes health the
+    -- first lexicographic key without encoding priority as magic score weights.
+    alg.prefer = function(a)
+        local pred, inner = a[1], a[2]
+        return function(scored, ctx)
+            local ordered = inner(scored, ctx)
+            local yes, no = {}, {}
+            for _, e in ipairs(ordered) do
+                if pred(e.candidate, ctx) then
+                    yes[#yes + 1] = e
+                else
+                    no[#no + 1] = e
+                end
+            end
+            for _, e in ipairs(no) do yes[#yes + 1] = e end
+            return yes
+        end
+    end
     -- top_k: order by the inner selector, then keep only the first k. The
     -- shortlist IS the failover sequence, so this bounds how many candidates
     -- the engine may try ("the 3 fastest", "the 5 best on benchmarks").
