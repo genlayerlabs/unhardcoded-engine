@@ -236,12 +236,31 @@ end
 -- encode (canonical serialization; the hash input)
 -- ===========================================================================
 
+-- Normalize a printf %g exponent to the canonical e±dd form — lowercase e,
+-- explicit sign, exponent zero-padded to a minimum of two digits (more only
+-- when needed). This lets the reference encoder self-enforce the SIGMA-POL §4.1
+-- grammar instead of trusting platform printf (e.g. MSVC's three-digit "e-005"
+-- collapses to "e-05"), so encode/fingerprint/identity are byte-identical on
+-- every libc. Exposed as T._normalize_exp so the conformance test can feed it
+-- non-canonical inputs directly — a 2-digit-printf host never produces them
+-- through %.17g, so encode() alone can't exercise this branch there.
+local function normalize_exp(s)
+    return (s:gsub("[eE]([%+%-]?)(%d+)", function(sign, digits)
+        if sign == "" then sign = "+" end
+        digits = digits:gsub("^0+", "")             -- strip leading zeros
+        if #digits == 0 then digits = "0" end
+        if #digits < 2 then digits = string.rep("0", 2 - #digits) .. digits end
+        return "e" .. sign .. digits
+    end))
+end
+T._normalize_exp = normalize_exp
+
 local function num_enc(v)
     if v == 0 then return "0" end           -- normalizes -0
     if v % 1 == 0 and v >= -2^53 and v <= 2^53 then
         return string.format("%.0f", v)
     end
-    return string.format("%.17g", v)
+    return normalize_exp(string.format("%.17g", v))
 end
 
 local function str_enc(v)
