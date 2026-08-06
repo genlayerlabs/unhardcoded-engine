@@ -270,6 +270,10 @@ return {
     -- ============================================================
     defaults = {
         -- circuit_breaker_threshold     = 3,
+        -- how long an open breaker stays open when no action said otherwise:
+        -- failure_ms after `threshold` consecutive faults, rate_limit_ms for
+        -- breaker records restored from before durations were recorded. An
+        -- action's own open_breaker_ms (above) overrides both.
         -- circuit_breaker_rate_limit_ms = 30000,
         -- circuit_breaker_failure_ms    = 300000,
         -- discovery_cache_ttl_ms        = 60000,

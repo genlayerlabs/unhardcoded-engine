@@ -53,6 +53,7 @@ local function base_config()
                 model_unavailable = { action = "next_provider_same_model" },
                 network_error    = { action = "retry_same", attempts = 2, backoff_ms = { 0, 0 },
                                      then_action = "next_candidate" },
+                payment_required = { action = "next_candidate", open_breaker_ms = 300000 },
                 unknown          = { action = "next_candidate" },
             },
         },
@@ -249,6 +250,108 @@ t.test("circuit breaker opens after rate_limit with open_breaker_ms", function()
     local b = r.runtime().circuit_breakers.p1
     t.truthy(b, "breaker entry exists for p1")
     t.truthy(b.open, "breaker is open")
+end)
+
+-- open_breaker_ms used to be read for truthiness only, so every open lasted
+-- the fixed 30s global window: a `payment_required` entry asking for 5min got
+-- 30s, i.e. ~10x the retry pressure against a provider that cannot succeed.
+t.test("the breaker holds for the action's open_breaker_ms, not the global window", function()
+    reset()
+    mock_host({
+        p1 = { { ok = false, error_kind = "payment_required" } },
+        p2 = { { ok = true, response = { text = "ok" } } },
+    })
+    router.execute({ prompt = "hi", profile = "default" })
+    local b = r.runtime().circuit_breakers.p1
+    t.truthy(b.open, "breaker is open")
+    t.eq(b.open_until_ms - b.opened_at_ms, 300000,
+         "held for the 5min the action asked for")
+end)
+
+t.test("an action-opened breaker is still open just before its duration elapses", function()
+    reset()
+    mock_host({
+        p1 = { { ok = false, error_kind = "payment_required" } },
+        p2 = { { ok = true, response = { text = "ok" } } },
+    })
+    router.execute({ prompt = "hi", profile = "default" })
+    local b = r.runtime().circuit_breakers.p1
+    t.truthy(r.circuit_breaker_state("p1", b.opened_at_ms + 30000),
+             "still open past the 30s global window it used to recover on")
+    t.truthy(r.circuit_breaker_state("p1", b.open_until_ms - 1),
+             "still open one tick before its own deadline")
+end)
+
+t.test("an action-opened breaker recovers only after its own duration", function()
+    reset()
+    mock_host({
+        p1 = { { ok = false, error_kind = "payment_required" } },
+        p2 = { { ok = true, response = { text = "ok" } } },
+    })
+    router.execute({ prompt = "hi", profile = "default" })
+    local until_ms = r.runtime().circuit_breakers.p1.open_until_ms
+    t.falsy(r.circuit_breaker_state("p1", until_ms), "recovered at its deadline")
+    t.falsy(r.runtime().circuit_breakers.p1.open, "RUNTIME reset by the wrapper")
+end)
+
+t.test("open_breaker_ms = 0 does not force the breaker open (0 is truthy in Lua)", function()
+    r.reset()
+    local cfg = base_config()
+    cfg.retry_policies.balanced.rate_limit =
+        { action = "next_candidate", open_breaker_ms = 0 }
+    assert(router.init(cfg))
+    mock_host({
+        p1 = { { ok = false, error_kind = "rate_limit" } },
+        p2 = { { ok = true, response = { text = "ok" } } },
+    })
+    router.execute({ prompt = "hi", profile = "default" })
+    local b = r.runtime().circuit_breakers.p1
+    t.eq(b.consecutive_failures, 1, "the failure still counts toward the threshold")
+    t.falsy(b.open, "a zero duration is no opinion, not an instant open")
+end)
+
+-- timeout carries no open_breaker_ms, so only the 3-failure threshold can open
+-- p1 — and the window is the engine's own, with no host opinion to defer to.
+t.test("threshold-triggered opens hold for the failure window", function()
+    reset()
+    mock_host({
+        p1 = { { ok = false, error_kind = "timeout" },
+               { ok = false, error_kind = "timeout" },
+               { ok = false, error_kind = "timeout" } },
+        p2 = { { ok = true, response = { text = "ok" } },
+               { ok = true, response = { text = "ok" } },
+               { ok = true, response = { text = "ok" } } },
+    })
+    for _ = 1, 3 do
+        router.execute({ prompt = "hi", profile = "default" })
+    end
+    local b = r.runtime().circuit_breakers.p1
+    t.eq(b.consecutive_failures, 3, "threshold reached")
+    t.truthy(b.open, "opened on the third consecutive failure")
+    t.eq(b.open_until_ms - b.opened_at_ms, r.defaults().circuit_breaker_failure_ms,
+         "held for the failure window, not the rate-limit one")
+end)
+
+-- p1 is demoted to score 0 once open (not dropped), so the loop still reaches
+-- it as a last resort after p2/p3 fail — which is how a success clears it.
+t.test("a success clears the breaker and its deadline", function()
+    reset()
+    mock_host({
+        p1 = { { ok = false, error_kind = "payment_required" },
+               { ok = true,  response = { text = "back" } } },
+        p2 = { { ok = true,  response = { text = "ok" } },
+               { ok = false, error_kind = "rate_limit" } },
+        p3 = { { ok = false, error_kind = "rate_limit" } },
+    })
+    router.execute({ prompt = "hi", profile = "default" })
+    t.truthy(r.runtime().circuit_breakers.p1.open, "open after the failure")
+
+    local res = router.execute({ prompt = "hi", profile = "default" })
+    t.eq(res.chosen.provider_id, "p1", "p1 reached as last resort and succeeded")
+    local b = r.runtime().circuit_breakers.p1
+    t.falsy(b.open, "success closed the breaker")
+    t.eq(b.consecutive_failures, 0, "failure count cleared")
+    t.falsy(b.open_until_ms, "deadline cleared with it")
 end)
 
 t.test("the engine no longer folds reliability (it is host-supplied)", function()

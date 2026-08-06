@@ -54,14 +54,25 @@ local function reset()
     assert(router.init(base_config()))
 end
 
--- Drive the documented breaker path: update_breaker_on_failure isn't directly
--- exposed, so open the breaker through RUNTIME exactly as the loop would
--- (consecutive_failures past threshold). We open it at a known opened_at_ms so
--- recovery math is deterministic.
+-- update_breaker_on_failure isn't directly exposed, so open the breaker through
+-- RUNTIME at a known opened_at_ms to keep the recovery math deterministic.
+-- This is deliberately the PRE-open_until_ms record shape — what a restored
+-- snapshot or host-injected state still looks like — so these cases pin the
+-- back-compat read path: no deadline recorded => the historical rate-limit
+-- window. open_breaker_until below covers records the current loop writes.
 local function open_breaker(pid, opened_at_ms, failures)
     r.runtime().circuit_breakers[pid] = {
         open = true,
         opened_at_ms = opened_at_ms,
+        consecutive_failures = failures or 3,
+    }
+end
+
+local function open_breaker_until(pid, opened_at_ms, until_ms, failures)
+    r.runtime().circuit_breakers[pid] = {
+        open = true,
+        opened_at_ms = opened_at_ms,
+        open_until_ms = until_ms,
         consecutive_failures = failures or 3,
     }
 end
@@ -113,6 +124,17 @@ t.test("breaker reads recovered past the window WITHOUT mutating RUNTIME", funct
     -- RUNTIME must still show the raw open breaker (we never reset it)
     t.truthy(r.runtime().circuit_breakers.p1.open,
              "RUNTIME breaker untouched (still open)")
+end)
+
+t.test("a breaker with its own deadline reports recovery from that deadline", function()
+    reset()
+    -- opened at t=1000 for 5min: the 30s window must not decide this one.
+    open_breaker_until("p1", 1000, 1000 + 300000, 4)
+    local p1 = router.provider_status(1000 + 30000).providers.p1
+    t.truthy(p1.breaker.open, "still open past the 30s rate-limit window")
+    t.eq(p1.breaker.ms_until_recovery, 270000, "counts down its own deadline")
+    t.falsy(router.provider_status(1000 + 300000).providers.p1.breaker.open,
+            "recovered at its deadline")
 end)
 
 t.test("provider_status does not mutate RUNTIME (open-breaker case)", function()
