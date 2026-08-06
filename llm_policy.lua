@@ -35,7 +35,7 @@ local CATALOG = {
 
 -- Mutable runtime state. dump_state/restore_state work on this.
 local RUNTIME = {
-    circuit_breakers   = {},  -- [provider_id] = { open, opened_at_ms, consecutive_failures }
+    circuit_breakers   = {},  -- [provider_id] = { open, opened_at_ms, open_until_ms, consecutive_failures }
     ema_metrics        = {},  -- [provider_id .. "|" .. model_family] = { price_in, price_out, last_quality_eval }; reliability is host-owned (#15)
     disabled_providers = {},  -- [provider_id] = { kind = error_kind, at_ms } (legacy: reason_string)
     discovery_cache    = {},  -- [discovery_id] = { offers, fetched_at_ms }
@@ -45,6 +45,10 @@ local RUNTIME = {
 -- Defaults that can be overridden by config.defaults
 local DEFAULTS = {
     circuit_breaker_threshold       = 3,
+    -- how long an open breaker stays open when nothing else says: the
+    -- rate-limit window applies to records stamped before open_until_ms
+    -- existed, the failure window to threshold-triggered opens. An action's
+    -- open_breaker_ms overrides both.
     circuit_breaker_rate_limit_ms   = 30 * 1000,
     circuit_breaker_failure_ms      = 5 * 60 * 1000,
     disable_provider_ttl_ms         = 5 * 60 * 1000,
@@ -438,14 +442,21 @@ local function breaker_view(b, now_ms)
                  opened_at_ms = b.opened_at_ms, ms_until_recovery = 0 }
     end
     local opened = b.opened_at_ms or 0
-    local window = DEFAULTS.circuit_breaker_rate_limit_ms
-    if now_ms - opened >= window then
+    -- Recovery is driven by the deadline the OPEN was stamped with, not by a
+    -- global window: that is the whole point of an action's open_breaker_ms.
+    -- Records written before open_until_ms existed (restored snapshots,
+    -- host-injected state) carry none, so they keep the historical fixed
+    -- rate-limit window — reading them any other way would silently restate
+    -- what the old code decided.
+    local until_ms = b.open_until_ms
+                  or (opened + DEFAULTS.circuit_breaker_rate_limit_ms)
+    if now_ms >= until_ms then
         -- auto-recovered (in the view; the wrapper resets RUNTIME)
         return { open = false, recovered = true, consecutive_failures = cf,
                  opened_at_ms = opened, ms_until_recovery = 0 }
     end
     return { open = true, consecutive_failures = cf, opened_at_ms = opened,
-             ms_until_recovery = math.max(0, opened + window - now_ms) }
+             ms_until_recovery = math.max(0, until_ms - now_ms) }
 end
 
 -- -> nil if absent/expired, else { kind, at_ms, ms_until_recovery }.
@@ -813,9 +824,24 @@ local function update_breaker_on_failure(provider_id, now_ms, open_breaker_ms)
     local b = RUNTIME.circuit_breakers[provider_id]
             or { open = false, consecutive_failures = 0 }
     b.consecutive_failures = (b.consecutive_failures or 0) + 1
-    if open_breaker_ms or b.consecutive_failures >= DEFAULTS.circuit_breaker_threshold then
-        b.open = true
-        b.opened_at_ms = now_ms
+    -- 0 is truthy in Lua, so a bare truthiness test made open_breaker_ms = 0
+    -- ("no opinion") force the breaker open. The magnitude decides both.
+    local forced = type(open_breaker_ms) == "number" and open_breaker_ms > 0
+    if forced or b.consecutive_failures >= DEFAULTS.circuit_breaker_threshold then
+        -- The action names the duration it wants held; a threshold-triggered
+        -- open carries no host opinion about the fault, so it falls back to
+        -- the long "this provider is out" window.
+        local until_ms = now_ms + (forced and open_breaker_ms
+                                          or DEFAULTS.circuit_breaker_failure_ms)
+        -- Never shorten a breaker that is already open: under the old fixed
+        -- window a repeat failure could only push recovery further out, and a
+        -- 30s rate_limit must not cut short a 5min payment_required.
+        if b.open and (b.open_until_ms or 0) > until_ms then
+            until_ms = b.open_until_ms
+        end
+        b.open          = true
+        b.opened_at_ms  = now_ms
+        b.open_until_ms = until_ms
     end
     RUNTIME.circuit_breakers[provider_id] = b
 end
@@ -825,6 +851,9 @@ local function update_breaker_on_success(provider_id)
     if b then
         b.consecutive_failures = 0
         b.open = false
+        -- the deadline only means something while open; clearing it keeps a
+        -- later re-open from inheriting a stale one.
+        b.open_until_ms = nil
     end
 end
 
