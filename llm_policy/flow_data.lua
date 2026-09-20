@@ -76,7 +76,7 @@ local function enc(v)
     local ty=type(v)
     if ty=="string" then return "s"..#v..":"..v end
     if ty=="boolean" then return v and "b1" or "b0" end
-    if ty=="number" then return "n"..tostring(v)..":" end
+    if ty=="number" then return "n"..string.format("%.0f",v)..":" end
     local keys={}; for k in pairs(v) do keys[#keys+1]=k end
     table.sort(keys,function(a,b) return enc(a)<enc(b) end)
     local out={"t",tostring(#keys),":"}

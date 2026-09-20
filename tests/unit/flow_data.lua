@@ -104,3 +104,11 @@ t.test('reference serializes typed strings into ordinary generation nodes',funct
         run_node=function(node,prompt) t.eq(prompt,'"hello"'); return 'reply' end})
     t.eq(result,'reply')
 end)
+
+
+t.test('integer-valued JSON options have one canonical numeric encoding',function()
+    local g=graph(); g[2].reply.max_tokens=512
+    local encoded=F.encode(F.normalize(g))
+    g[2].reply.max_tokens=512.0
+    t.eq(F.encode(F.normalize(g)),encoded)
+end)
