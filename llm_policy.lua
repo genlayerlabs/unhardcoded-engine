@@ -812,6 +812,8 @@ local function build_request(cand, contract)
         decision        = contract.decision,
         tools           = contract.tools,
         response_format = contract.response_format,
+        reasoning       = contract.reasoning,
+        reasoning_effort = contract.reasoning_effort,
         images          = contract.images,
         temperature     = contract.temperature,
         seed            = contract.seed,
