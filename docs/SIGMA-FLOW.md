@@ -95,7 +95,7 @@ identity.
 Total, runs before anything executes, rejects a hostile flow before recursion:
 
 1. **Shape.** `t[1] == "flow"`; `t[2]` is a map of string id → node record; each
-   node has a `kind ∈ {input, llm, output}`.
+   node has a `kind ∈ {input, llm, output, decision, data}` (extensions below).
 2. **Single source / single sink.** Exactly one `input` node and exactly one
    `output` node.
 3. **Arity by kind.** `input` has no `inputs`; `output` has exactly one input
@@ -207,3 +207,61 @@ The reference driver passes routing to `opts.run_node`, like the node's existing
 policy. The host effect asks the decision model once and executes only the
 selected declared generation policy. It owns timeout, uncertainty/failure
 fallback, usage and trace handling. This does not add shell execution to the flow.
+
+## Typed decisions and bounded data composition
+
+These are append-only extensions to `sigma-flow/v1`. Existing encodings without
+the new fields are byte-identical (a pre-extension golden fixture checks this).
+Every new semantic option participates in normalization and identity. Node IDs
+remain labels; references are only in ordered `inputs`, never inside options.
+
+`decision` nodes have `inputs`, `policy`, and `questions`. Questions use the typed
+decision protocol (`choice`, `score`, `noul`): 1–32 named questions, instructions
+of 1–2000 bytes, bounded criteria. The core admits every policy and question
+before any effects. The host additionally checks the decision wire budget. The
+state is the single input's typed value, or an ordered list of multiple values.
+The result is a map of question IDs to validated typed answers. No generation is
+implied by a decision node.
+
+`data` nodes have an `operation` and the following closed options. They perform
+no inference, I/O, code execution or evaluation of arbitrary expressions:
+
+| Operation | Inputs | Options and semantics |
+| --- | --- | --- |
+| `project` | one object | `path`: 1–16 object keys; fail on a missing key. |
+| `select` | records, mask | `field`, `equals`: retain records whose matching mask object has that string field/value; unmatched records are excluded. |
+| `overlay` | base, replacements, optional removals | Unknown replacement/removal keys fail. Removals win. Missing replacements retain the original. Optional `min_string_bytes`, `max_string_bytes` and `only_shrink` constrain replacements; rejected replacements retain the original. |
+| `union` | 1–32 record maps | Disjoint union; duplicate keys fail. |
+
+A record map has at most 128 string keys, each 1–128 bytes. String lengths are
+UTF-8 byte lengths. Operations do not mutate their inputs. Ordered reconstruction
+of application objects remains the caller's job; map keys carry stable item IDs.
+The Lua reference exposes these pure operations as `llm_policy.flow_data.run`;
+the host mirrors them over JSON values and checks conformance. Runtime nulls and
+array/object distinctions must be preserved by the host's JSON representation.
+
+The following optional controls apply where indicated:
+
+- `on_error: "input"` (`decision`, `data`, `llm`): return the first input on a
+  failed node, retaining a failure/fallback trace. Otherwise failure stops the
+  flow. This is abstention, not a fabricated decision or successful model call.
+- `skip_empty: true` (`decision`, `llm`): if the first input is an empty record
+  map or array, pass it through without calling a model.
+- `output_format: "json"` (`llm`): the host requires complete, valid JSON and
+  forwards its typed value. Truncation, duplicate keys and tool calls fail.
+- `context: "inputs"` (`llm`): only declared inputs and the node's system prompt
+  reach the model. Absent this field, existing conversation inheritance remains.
+- `max_tokens` (`llm`): integer 1–4096. `timeout_ms` (`llm`, `decision`): integer
+  1–40000. The host may impose a smaller shared request deadline.
+
+The graph remains finite and acyclic: no foreach, recursion, dynamic edges or
+model-created nodes. A client may deterministically prepare a bounded DAG from
+its input **before admission**. Every node is visited once, with bounded record
+operations. A skipped node is explicit in the trace and performs no effects.
+
+For typed nodes, the reference `run_node` effect returns the already validated
+typed value (and throws on failure); `opts.encode_data` supplies JSON encoding
+for typed LLM inputs, including strings projected from records. Set
+`opts.typed_input=true` for a typed scalar input (tables are inferred). The
+production host owns provider response parsing,
+deadlines, cancellation, telemetry and its lossless JSON representation.

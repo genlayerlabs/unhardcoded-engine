@@ -18,13 +18,14 @@
 
 local term   = require("llm_policy.term")
 local fields = require("llm_policy.fields")
+local data = require("llm_policy.flow_data")
 
 local F = {}
 
 F.VERSION = "sigma-flow/v1"
 -- Admission bounds (part of the spec): reject a hostile flow before recursion.
 F.LIMITS  = { max_nodes = 256, max_in_degree = 32 }
-F.KINDS   = { input = true, llm = true, output = true }
+F.KINDS   = { input = true, llm = true, output = true, decision = true, data = true }
 
 -- ===========================================================================
 -- shared helpers
@@ -111,6 +112,10 @@ function F.check(flow, schema)
     end
     local nodes = flow[2]
 
+    for id in pairs(nodes) do
+        if type(id) ~= "string" then return nil, "invalid node id" end
+    end
+
     local ids = ids_of(nodes)
     if #ids == 0 then return nil, "$: flow has no nodes" end
     if #ids > F.LIMITS.max_nodes then
@@ -125,6 +130,17 @@ function F.check(flow, schema)
         if not F.KINDS[kind] then
             return nil, "node '" .. id .. "': unknown kind '" .. tostring(kind) .. "'"
         end
+        if node.inputs ~= nil then
+            if type(node.inputs) ~= "table" then return nil, "inputs must be an array" end
+            local count=0
+            for k,v in pairs(node.inputs) do
+                count=count+1
+                if type(k)~="number" or k%1~=0 or k<1 or k>#node.inputs or type(v)~="string" then return nil,"invalid input reference" end
+            end
+            if count~=#node.inputs then return nil,"sparse inputs" end
+        elseif kind ~= "input" then return nil,"missing inputs" end
+        local extra_ok, extra_err = data.check(node)
+        if not extra_ok then return nil, "node " .. id .. ": " .. extra_err end
         if node.routing ~= nil then
             if kind ~= "llm" then return nil, "routing is only valid on llm nodes" end
             local ok, err = check_routing(node.routing, schema)
@@ -137,21 +153,23 @@ function F.check(flow, schema)
         elseif kind == "output" then
             n_output = n_output + 1
             if nin ~= 1 then return nil, "output node '" .. id .. "' takes exactly one input" end
-        else -- llm
+        else -- model or data node
             if nin < 1 then return nil, "llm node '" .. id .. "' needs at least one input" end
             if nin > F.LIMITS.max_in_degree then
                 return nil, "llm node '" .. id .. "' exceeds max in-degree " .. F.LIMITS.max_in_degree
             end
-            if type(node.system) ~= "string" then
+            if kind == "llm" and type(node.system) ~= "string" then
                 return nil, "llm node '" .. id .. "' needs a string system prompt"
             end
             if node.template ~= nil and type(node.template) ~= "string" then
                 return nil, "llm node '" .. id .. "' template must be a string"
             end
-            local sort, err = term.check(node.policy, schema)
-            if sort == nil then return nil, "llm node '" .. id .. "' policy: " .. err end
-            if sort ~= "Policy" then
-                return nil, "llm node '" .. id .. "' policy must be a Policy term, got " .. sort
+            if kind ~= "data" then
+                local sort, err = term.check(node.policy, schema)
+                if sort == nil then return nil, "node '" .. id .. "' policy: " .. err end
+                if sort ~= "Policy" then
+                    return nil, "node '" .. id .. "' policy must be a Policy term, got " .. sort
+                end
             end
         end
         for _, pre in ipairs(node.inputs or {}) do
@@ -229,8 +247,10 @@ local function content_key(node)
             "llm", node.system or "",
             term.encode(term.normalize(node.policy)),
             node.template or "",
-        }, "\0") .. (node.routing and ("\0" .. routing_key(node.routing)) or "")
+        }, "\0") .. (node.routing and ("\0" .. routing_key(node.routing)) or "") .. (data.options(node) ~= "" and ("\0data=" .. data.options(node)) or "")
     end
+    if node.kind == "decision" then return "decision\0" .. term.encode(term.normalize(node.policy)) .. "\0" .. data.options(node) end
+    if node.kind == "data" then return "data\0" .. data.options(node) end
     return node.kind            -- input / output carry nothing else
 end
 
@@ -287,6 +307,8 @@ function F.normalize(flow)
                 end
             end
         end
+        if node.kind == "decision" then nn.policy = term.normalize(node.policy) end
+        data.copy_options(node, nn)
         out[newid[id]] = nn
     end
     return { "flow", out }
@@ -317,6 +339,9 @@ function F.encode(flow)
             if node.template ~= nil then seg[#seg + 1] = "template=" .. str_enc(node.template) end
             if node.routing then seg[#seg + 1] = "routing=" .. routing_key(node.routing, true) end
         end
+        if node.kind == "decision" then seg[#seg + 1] = "policy=" .. term.encode(term.normalize(node.policy)) end
+        local options = data.options(node)
+        if options ~= "" then seg[#seg + 1] = "data=" .. options end
         if node.inputs then
             seg[#seg + 1] = "inputs=[" .. table.concat(node.inputs, ",") .. "]"
         end
@@ -381,11 +406,41 @@ function F.run(flow, opts)
     end
 
     local assemble = opts.assemble or default_assemble
-    local out, trace = {}, {}
-    out[input_id] = opts.input or ""
+    local out, trace, typed = {}, {}, {}
+    if opts.input ~= nil then out[input_id] = opts.input else out[input_id] = "" end
+    typed[input_id] = opts.typed_input or type(opts.input) == "table"
     for _, id in ipairs(order) do
         local node = nodes[id]
-        if node.kind == "llm" then
+        local typed_parts = false
+        for _,pre in ipairs(node.inputs or {}) do if typed[pre] then typed_parts=true end end
+        if node.kind == "data" or node.kind == "decision" or (node.kind == "llm" and (typed_parts or data.options(node) ~= "")) then
+            local values = {}; for i,pre in ipairs(node.inputs) do values[i]=out[pre] end
+            local skipped = node.skip_empty and data.empty(values[1])
+            local ok, result
+            if skipped then ok,result=true,values[1]
+            elseif node.kind == "data" then ok,result=pcall(data.run,node,values)
+            else
+                local prompt = values[1]
+                if node.kind == "decision" then
+                    if #values > 1 then prompt=values end
+                else
+                    local parts={}
+                    for i,v in ipairs(values) do
+                        local text = v
+                        if typed[node.inputs[i]] then text=assert(opts.encode_data,"typed LLM input needs encode_data")(v) end
+                        parts[i]={id=node.inputs[i],text=text}
+                    end
+                    prompt=assemble(node,parts)
+                end
+                ok,result=pcall(opts.run_node,node,prompt)
+            end
+            local fallback = not ok and node.on_error == "input"
+            if not ok and not fallback then error(result) end
+            if fallback then out[id]=values[1] else out[id]=result end
+            if skipped or fallback then typed[id]=typed[node.inputs[1]]
+            else typed[id]=node.kind ~= "llm" or node.output_format == "json" end
+            trace[#trace+1]={node=id,kind=node.kind,skipped=skipped or false,fallback=fallback}
+        elseif node.kind == "llm" then
             local parts = {}
             for i, pre in ipairs(node.inputs) do parts[i] = { id = pre, text = out[pre] or "" } end
             local prompt = assemble(node, parts)
@@ -396,6 +451,7 @@ function F.run(flow, opts)
             }
         elseif node.kind == "output" then
             out[id] = out[node.inputs[1]]
+            typed[id] = typed[node.inputs[1]]
         end
     end
     return out[output_id], trace

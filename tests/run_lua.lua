@@ -20,6 +20,7 @@ local files = {
     "tests/unit/ir_elaborate.lua",
     "tests/unit/ir_golden.lua",
     "tests/unit/flow_basic.lua",
+    "tests/unit/flow_data.lua",
     "tests/unit/reliability_field.lua",
 }
 
