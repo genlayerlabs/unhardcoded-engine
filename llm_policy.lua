@@ -391,6 +391,7 @@ local function gather_marketplace_candidates(now_ms)
                         -- (back-compatible — every offer predating the field).
                         served_model_id = offer.wire_model_id or offer.model_family,
                         capabilities    = offer.capabilities or {},
+                        protocol        = offer.protocol or "chat",
                         quality_hint    = offer.quality_hint,
                         raw_price_in    = offer.price_in_usd_per_mtok,
                         raw_price_out   = offer.price_out_usd_per_mtok,
@@ -744,18 +745,37 @@ local function resolve_plan(contract, now_ms)
         for _, c in ipairs(contract.extra_candidates) do pool[#pool + 1] = enrich_with_prices(c) end
     end
 
-    -- Pin short-circuits filtering (the pinned candidate is still scored).
+    -- Protocol is an execution boundary, not an optional policy predicate.
+    -- Even pins and caller policies without meets_req cannot cross it.
+    local compatible, protocol_rejected = {}, {}
+    local protocol = contract.protocol or "chat"
+    for _, cand in ipairs(pool) do
+        if (protocol == "chat" or protocol == "decisions")
+            and (cand.protocol or "chat") == protocol then
+            compatible[#compatible + 1] = cand
+        else
+            protocol_rejected[#protocol_rejected + 1] = {
+                candidate = cand, reason = "protocol_mismatch",
+            }
+        end
+    end
+    pool = compatible
+
+    -- Pin short-circuits policy filtering (but never protocol isolation).
     local req = contract.requirements or {}
     if req.pin then
         for _, cand in ipairs(pool) do
             if cand.provider_id == req.pin.provider and cand.model_family == req.pin.model then
-                return pol.select({ cand }, ctx), nil, {}, pol, ctx
+                return pol.select({ cand }, ctx), nil, protocol_rejected, pol, ctx
             end
         end
         return {}, nil, { { reason = "pin_not_found", pin = req.pin } }, pol, ctx
     end
 
     local planned = pol.plan(pool, ctx)
+    for _, rejection in ipairs(protocol_rejected) do
+        planned.rejected[#planned.rejected + 1] = rejection
+    end
     return planned.ordered, nil, planned.rejected, pol, ctx
 end
 
@@ -788,6 +808,8 @@ local function build_request(cand, contract)
         auth_env        = cand.auth_env,
         auth            = cand.auth,
         messages        = messages,
+        protocol        = contract.protocol or "chat",
+        decision        = contract.decision,
         tools           = contract.tools,
         response_format = contract.response_format,
         images          = contract.images,
@@ -963,7 +985,21 @@ local function advance(state)
             state.awaiting     = "response"
             -- mutate is per-attempt and candidate-aware (greybox re-diversifies
             -- on each retry); default policy uses mutate.identity (no change).
-            local request = state.policy.mutate(build_request(cand, state.contract), cand, state.ctx)
+            local original = build_request(cand, state.contract)
+            local request = state.policy.mutate(original, cand, state.ctx)
+            -- Protocol and typed payload are not sampling parameters. A caller
+            -- Xform cannot turn a selected chat route into a decisions call.
+            request.protocol = state.contract.protocol or "chat"
+            request.decision = state.contract.decision
+            if request.protocol == "decisions" then
+                -- Keep the validated decision attached to the admitted route,
+                -- including its credential and endpoint, through Xforms.
+                local route = build_request(cand, state.contract)
+                for _, key in ipairs({ "provider_id", "model_family", "served_model_id",
+                    "base_url", "aws_region", "api_kind", "auth_env", "auth", "offer" }) do
+                    request[key] = route[key]
+                end
+            end
             return {
                 status       = "call",
                 request      = request,
