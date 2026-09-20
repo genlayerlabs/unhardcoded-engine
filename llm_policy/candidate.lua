@@ -100,6 +100,7 @@ function C.build_candidate_matrix(providers, models)
                     model_family     = family,
                     served_model_id  = served.provider_model_id or family,
                     capabilities     = m.capabilities,
+                    protocol         = m.protocol or "chat",
                     quality_hint     = m.static_quality_hint,
                     tier             = p.tier or "fallback",
                     has_tee          = p.has_tee or false,
