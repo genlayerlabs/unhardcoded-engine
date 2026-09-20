@@ -90,3 +90,48 @@ t.test("admission rejects malformed flows", function()
     local ok3, err3 = F.check(dangle)
     t.falsy(ok3); t.contains(err3, "path input -> output")
 end)
+
+local function routed()
+    local f = MOA()
+    f[2].a.routing = {
+        policy = POLICY(), instructions = "Select the required generation capability.",
+        fallback = "capable", min_confidence = 0.7, timeout_ms = 1500,
+        choices = {
+            economy = {description = "Routine generation", policy = POLICY()},
+            capable = {description = "Novel reasoning or failed attempts", policy = POLICY()},
+        },
+    }
+    return f
+end
+
+t.test("decision routing survives normalization and changes flow identity", function()
+    local f = routed()
+    t.truthy(F.check(f))
+    local encoded = F.encode(F.normalize(f))
+    t.eq(F.encode(F.normalize(F.normalize(f))), encoded)
+    t.truthy(encoded ~= F.encode(F.normalize(MOA())))
+    f[2].a.routing.choices.economy.description = "Changed decision semantics"
+    t.truthy(F.encode(F.normalize(f)) ~= encoded)
+    local changed = routed()
+    changed[2].a.routing.choices.economy.policy[2] = {"not", {"meets_req"}}
+    t.truthy(F.encode(F.normalize(changed)) ~= encoded)
+    changed = routed(); changed[2].a.routing.timeout_ms = 2000
+    t.truthy(F.encode(F.normalize(changed)) ~= encoded)
+end)
+
+t.test("routing admission validates every branch before inference", function()
+    local f = routed(); f[2].a.routing.fallback = "invented"
+    t.falsy(F.check(f))
+    f = routed(); f[2].a.routing.choices.economy.policy = {"invented"}
+    t.falsy(F.check(f))
+    f = routed(); f[2].a.routing.min_confidence = 0/0
+    t.falsy(F.check(f))
+    f = routed(); f[2].a.routing.timeout_ms = 1500.5
+    t.falsy(F.check(f))
+    f = routed(); f[2].a.routing.instructions = string.rep("x", 2001)
+    t.falsy(F.check(f))
+    f = routed(); f[2].a.routing.model = "unadmitted-model"
+    t.falsy(F.check(f))
+    f = routed(); f[2].u.routing = f[2].a.routing
+    t.falsy(F.check(f))
+end)

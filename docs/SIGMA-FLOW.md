@@ -191,3 +191,19 @@ the traces. Its output — a score per flow on a benchmark — can be **register
 back as a `model_meta`-style field** (SIGMA-POL §3.1), so Σ_pol policies can then
 rank *flows* by *your own* benchmarks. Σ_pol → Σ_flow → eval → back to Σ_pol as
 data. The eval layer never depends on the IR; it depends only on the endpoint.
+
+## Optional decision routing on an LLM node
+
+An `llm` node may carry `routing = {policy, instructions, choices, fallback,
+min_confidence, timeout_ms}`. `policy` is a Sigma policy for a typed decision
+model. `choices` maps 2–16 identifiers (1–64 bytes) to `{description, policy}`
+records for generation. Descriptions and instructions are 1–2000 bytes. The
+fallback must name a choice; confidence is finite in [0,1]; timeout is an integer
+from 100 through 10000 milliseconds. Unknown routing/choice fields are rejected.
+All nested policies are admitted before effects. Routing changes canonical
+identity; flows without routing retain their existing encoding.
+
+The reference driver passes routing to `opts.run_node`, like the node's existing
+policy. The host effect asks the decision model once and executes only the
+selected declared generation policy. It owns timeout, uncertainty/failure
+fallback, usage and trace handling. This does not add shell execution to the flow.
