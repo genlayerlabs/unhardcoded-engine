@@ -21,6 +21,18 @@ t.test('chat defaults preserve existing callers and exclude decision models', fu
     local step = router.execute_step(nil, { prompt = 'hello' })
     t.eq(step.request.model_family, 'chat')
     t.eq(step.request.protocol, 'chat')
+    t.eq(step.request.reasoning, nil)
+    t.eq(step.request.reasoning_effort, nil)
+end)
+
+t.test('generation controls survive request construction and policy overrides', function()
+    reset()
+    local step = router.execute_step(nil, {prompt = 'hello', reasoning = {enabled = false},
+        reasoning_effort = 'high', policy_ir = {'policy', {'meets_req'}, {'zero'}, {'argmax'},
+            {'set_param', 'reasoning_effort', 'low'}, {'always', {action = 'next_candidate'}}}})
+    t.eq(step.status, 'call')
+    t.eq(step.request.reasoning.enabled, false)
+    t.eq(step.request.reasoning_effort, 'low')
 end)
 
 t.test('decision payload survives the engine and marketplace fallbacks', function()
