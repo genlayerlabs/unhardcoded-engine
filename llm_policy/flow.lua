@@ -53,6 +53,53 @@ local function find_endpoints(nodes)
     return input_id, output_id
 end
 
+-- Optional decision routing selects ONE policy for an llm node. It is part of
+-- the node's identity, not an opaque host extension. Existing flows are unchanged.
+local function routing_key(r, normalized)
+    if not r then return "" end
+    local encode_policy = function(p)
+        return term.encode(normalized and p or term.normalize(p))
+    end
+    local parts = {str_enc(r.instructions), encode_policy(r.policy), str_enc(r.fallback),
+                   tostring(r.min_confidence), tostring(r.timeout_ms)}
+    for _, id in ipairs(ids_of(r.choices)) do
+        local c = r.choices[id]
+        parts[#parts + 1] = str_enc(id) .. ":" .. str_enc(c.description) .. ":" .. encode_policy(c.policy)
+    end
+    return table.concat(parts, "|")
+end
+
+local function check_routing(r, schema)
+    if type(r) ~= "table" then return nil, "routing must be a record" end
+    local allowed = {policy=true, instructions=true, choices=true, fallback=true,
+                     min_confidence=true, timeout_ms=true}
+    for k in pairs(r) do if not allowed[k] then return nil, "unknown routing field" end end
+    if type(r.instructions) ~= "string" or #r.instructions < 1 or #r.instructions > 2000 then
+        return nil, "routing instructions must be 1..2000 bytes"
+    end
+    if term.check(r.policy, schema) ~= "Policy" then return nil, "invalid decision policy" end
+    if type(r.choices) ~= "table" then return nil, "routing needs choices" end
+    local count = 0
+    for id, c in pairs(r.choices) do
+        count = count + 1
+        if type(id) ~= "string" or #id < 1 or #id > 64 or type(c) ~= "table" or
+           type(c.description) ~= "string" or #c.description < 1 or #c.description > 2000 or
+           term.check(c.policy, schema) ~= "Policy" then return nil, "invalid routing choice" end
+        for k in pairs(c) do
+            if k ~= "description" and k ~= "policy" then return nil, "unknown choice field" end
+        end
+    end
+    if count < 2 or count > 16 then return nil, "routing needs 2..16 choices" end
+    if type(r.fallback) ~= "string" or not r.choices[r.fallback] then return nil, "invalid routing fallback" end
+    if type(r.min_confidence) ~= "number" or not (r.min_confidence >= 0 and r.min_confidence <= 1) then
+        return nil, "invalid routing confidence"
+    end
+    if type(r.timeout_ms) ~= "number" or r.timeout_ms % 1 ~= 0 or r.timeout_ms < 100 or r.timeout_ms > 10000 then
+        return nil, "invalid routing timeout"
+    end
+    return true
+end
+
 -- ===========================================================================
 -- check
 -- ===========================================================================
@@ -77,6 +124,11 @@ function F.check(flow, schema)
         local kind = node.kind
         if not F.KINDS[kind] then
             return nil, "node '" .. id .. "': unknown kind '" .. tostring(kind) .. "'"
+        end
+        if node.routing ~= nil then
+            if kind ~= "llm" then return nil, "routing is only valid on llm nodes" end
+            local ok, err = check_routing(node.routing, schema)
+            if not ok then return nil, "node '" .. id .. "': " .. err end
         end
         local nin = (type(node.inputs) == "table") and #node.inputs or 0
         if kind == "input" then
@@ -177,7 +229,7 @@ local function content_key(node)
             "llm", node.system or "",
             term.encode(term.normalize(node.policy)),
             node.template or "",
-        }, "\0")
+        }, "\0") .. (node.routing and ("\0" .. routing_key(node.routing)) or "")
     end
     return node.kind            -- input / output carry nothing else
 end
@@ -226,6 +278,14 @@ function F.normalize(flow)
             nn.system = node.system
             nn.policy = term.normalize(node.policy)
             if node.template ~= nil then nn.template = node.template end
+            if node.routing then
+                local r = node.routing
+                nn.routing = {policy=term.normalize(r.policy), instructions=r.instructions,
+                    fallback=r.fallback, min_confidence=r.min_confidence, timeout_ms=r.timeout_ms, choices={}}
+                for name, c in pairs(r.choices) do
+                    nn.routing.choices[name] = {description=c.description, policy=term.normalize(c.policy)}
+                end
+            end
         end
         out[newid[id]] = nn
     end
@@ -255,6 +315,7 @@ function F.encode(flow)
             seg[#seg + 1] = "system=" .. str_enc(node.system)
             seg[#seg + 1] = "policy=" .. term.encode(term.normalize(node.policy))
             if node.template ~= nil then seg[#seg + 1] = "template=" .. str_enc(node.template) end
+            if node.routing then seg[#seg + 1] = "routing=" .. routing_key(node.routing, true) end
         end
         if node.inputs then
             seg[#seg + 1] = "inputs=[" .. table.concat(node.inputs, ",") .. "]"
