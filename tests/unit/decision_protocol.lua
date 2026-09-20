@@ -53,3 +53,17 @@ t.test('pins cannot cross protocol boundaries and unknown protocols fail closed'
         t.falsy(step.result.ok)
     end
 end)
+
+t.test('Xforms cannot override decision protocol payload or admitted route', function()
+    reset()
+    local step = router.execute_step(nil, { protocol = 'decisions', decision = {state = 'original'},
+        policy_ir = {'policy', {'top'}, {'zero'}, {'argmax'},
+            {'seq', {'set_param', 'protocol', 'chat'}, {'set_param', 'decision', 'forged'},
+                {'set_param', 'base_url', 'https://foreign'}, {'set_param', 'served_model_id', 'chat'}},
+            {'always', {action = 'next_candidate'}}} })
+    t.eq(step.status, 'call')
+    t.eq(step.request.protocol, 'decisions')
+    t.eq(step.request.decision.state, 'original')
+    t.truthy(step.request.base_url ~= 'https://foreign')
+    t.truthy(step.request.served_model_id ~= 'chat')
+end)

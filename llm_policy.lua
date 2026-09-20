@@ -985,7 +985,21 @@ local function advance(state)
             state.awaiting     = "response"
             -- mutate is per-attempt and candidate-aware (greybox re-diversifies
             -- on each retry); default policy uses mutate.identity (no change).
-            local request = state.policy.mutate(build_request(cand, state.contract), cand, state.ctx)
+            local original = build_request(cand, state.contract)
+            local request = state.policy.mutate(original, cand, state.ctx)
+            -- Protocol and typed payload are not sampling parameters. A caller
+            -- Xform cannot turn a selected chat route into a decisions call.
+            request.protocol = state.contract.protocol or "chat"
+            request.decision = state.contract.decision
+            if request.protocol == "decisions" then
+                -- Keep the validated decision attached to the admitted route,
+                -- including its credential and endpoint, through Xforms.
+                local route = build_request(cand, state.contract)
+                for _, key in ipairs({ "provider_id", "model_family", "served_model_id",
+                    "base_url", "aws_region", "api_kind", "auth_env", "auth", "offer" }) do
+                    request[key] = route[key]
+                end
+            end
             return {
                 status       = "call",
                 request      = request,
