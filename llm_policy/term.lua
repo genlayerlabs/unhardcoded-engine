@@ -36,7 +36,21 @@ T.VERSION = SIG.VERSION
 
 -- Admission bounds (part of the spec): terms from untrusted callers are
 -- rejected before recursion can exhaust the stack or the validator's time.
-T.LIMITS = { max_depth = 64, max_nodes = 4096 }
+-- Parameter payloads are bounded too: node count alone let one node carry an
+-- arbitrarily large string/array, and retry knobs are capped so a caller's
+-- FailPlan cannot turn one request into an unbounded call loop.
+T.LIMITS = { max_depth = 64, max_nodes = 4096, max_string_len = 256,
+             max_param_entries = 64, max_retry_attempts = 10,
+             max_backoff_ms = 60000, max_backoff_entries = 16 }
+
+-- set_param/inject_seed/clamp_param/jitter may only touch sampling/limit
+-- fields. Route keys (base_url, auth_env, auth, provider_id, offer, ...) and
+-- payload (messages, tools, protocol, decision) are never Xform targets.
+T.PARAM_NAMES = {
+    temperature = true, top_p = true, top_k = true, max_tokens = true, seed = true,
+    presence_penalty = true, frequency_penalty = true, reasoning_effort = true,
+    timeout_ms = true, first_token_timeout_ms = true,
+}
 
 -- ===========================================================================
 -- check
@@ -51,6 +65,21 @@ local function is_finite_number(v)
     return type(v) == "number" and v == v and v ~= math.huge and v ~= -math.huge
 end
 
+local function short_string(v)
+    return type(v) == "string" and #v <= T.LIMITS.max_string_len
+end
+
+-- entry count over the whole table (array AND hash part)
+local function entries(v)
+    local n = 0
+    for _ in pairs(v) do n = n + 1 end
+    return n
+end
+
+local function is_backoff(x)
+    return is_finite_number(x) and x >= 0 and x <= T.LIMITS.max_backoff_ms
+end
+
 local function check_action(v)
     if type(v) ~= "table" then return "Action must be a record" end
     if not sequence.ACTIONS[v.action] then
@@ -59,8 +88,10 @@ local function check_action(v)
     if v.then_action ~= nil and not sequence.ACTIONS[v.then_action] then
         return "Action.then_action invalid: " .. tostring(v.then_action)
     end
-    if v.attempts ~= nil and not is_finite_number(v.attempts) then
-        return "Action.attempts must be a number"
+    if entries(v) > T.LIMITS.max_param_entries then return "Action has too many keys" end
+    if v.attempts ~= nil and (not is_finite_number(v.attempts) or v.attempts % 1 ~= 0
+        or v.attempts < 0 or v.attempts > T.LIMITS.max_retry_attempts) then
+        return "Action.attempts must be an integer in [0, " .. T.LIMITS.max_retry_attempts .. "]"
     end
     if v.open_breaker_ms ~= nil and not is_finite_number(v.open_breaker_ms) then
         return "Action.open_breaker_ms must be a number"
@@ -68,15 +99,22 @@ local function check_action(v)
     local b = v.backoff_ms
     if b ~= nil and not is_finite_number(b) then
         if type(b) ~= "table" then return "Action.backoff_ms must be a number or array" end
-        for _, x in ipairs(b) do
-            if not is_finite_number(x) then return "Action.backoff_ms entries must be numbers" end
+        if entries(b) > T.LIMITS.max_backoff_entries then
+            return "Action.backoff_ms has more than " .. T.LIMITS.max_backoff_entries .. " entries"
         end
+        for _, x in pairs(b) do
+            if not is_backoff(x) then
+                return "Action.backoff_ms entries must be numbers in [0, " .. T.LIMITS.max_backoff_ms .. "]"
+            end
+        end
+    elseif b ~= nil and not is_backoff(b) then
+        return "Action.backoff_ms must be in [0, " .. T.LIMITS.max_backoff_ms .. "]"
     end
     for k, x in pairs(v) do
         if not ACTION_KEYS[k] then
             -- the action VERBS are closed; extra keys are host-interpreted
             -- numeric knobs (e.g. mark_unavailable_ms) and must be numbers
-            if type(k) ~= "string" or not is_finite_number(x) then
+            if not short_string(k) or not is_finite_number(x) then
                 return "Action key '" .. tostring(k) .. "' must map to a finite number"
             end
         end
@@ -86,13 +124,19 @@ end
 
 local function check_recipe(v)
     if type(v) ~= "table" then return "Recipe must be an array" end
+    if entries(v) > T.LIMITS.max_param_entries then return "Recipe has too many steps" end
     for i, step in ipairs(v) do
-        if type(step) ~= "string" then
+        if type(step) == "string" then
+            if not short_string(step) then return "Recipe[" .. i .. "] string too long" end
+        else
             if type(step) ~= "table" then
                 return "Recipe[" .. i .. "] must be a string or flat record"
             end
+            if entries(step) > T.LIMITS.max_param_entries then
+                return "Recipe[" .. i .. "] has too many keys"
+            end
             for k, x in pairs(step) do
-                if type(k) ~= "string" or not is_finite_number(x) then
+                if not short_string(k) or not is_finite_number(x) then
                     return "Recipe[" .. i .. "] must map string keys to numbers"
                 end
             end
@@ -107,10 +151,11 @@ local CHAIN_KEYS = {
 
 local function check_chain(v)
     if type(v) ~= "table" then return "Chain must be an array" end
+    if entries(v) > T.LIMITS.max_param_entries then return "Chain has too many entries" end
     for i, e in ipairs(v) do
         if type(e) ~= "table"
-           or type(e.provider or e.provider_id) ~= "string"
-           or type(e.model or e.model_family) ~= "string" then
+           or not short_string(e.provider or e.provider_id)
+           or not short_string(e.model or e.model_family) then
             return "Chain[" .. i .. "] must be { provider=, model= }"
         end
         -- Closed record. An extra key — worse, an array part — would make
@@ -156,10 +201,19 @@ local function check_param(sort, v, schema)
         or sort == "ParamName" or sort == "Sym" or sort == "Provenance"
         or sort == "FailReason" then
         if type(v) ~= "string" then return "expected a string (" .. sort .. ")" end
+        if #v > T.LIMITS.max_string_len then
+            return sort .. " exceeds " .. T.LIMITS.max_string_len .. " bytes"
+        end
+        if sort == "ParamName" and not T.PARAM_NAMES[v] then
+            return "parameter '" .. v .. "' is not a sampling parameter"
+        end
     elseif sort == "Scalar" then
         local t = type(v)
         if t ~= "string" and t ~= "boolean" and not is_finite_number(v) then
             return "expected a scalar (number|string|boolean)"
+        end
+        if t == "string" and #v > T.LIMITS.max_string_len then
+            return "Scalar string exceeds " .. T.LIMITS.max_string_len .. " bytes"
         end
     elseif sort == "Action" then
         return check_action(v)
