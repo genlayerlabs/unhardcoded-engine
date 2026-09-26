@@ -52,6 +52,12 @@ local DEFAULTS = {
     circuit_breaker_rate_limit_ms   = 30 * 1000,
     circuit_breaker_failure_ms      = 5 * 60 * 1000,
     disable_provider_ttl_ms         = 5 * 60 * 1000,
+    -- Per-call (caller-supplied) policies share breakers with every tenant:
+    -- their open_breaker_ms is clamped to this, and they may only disable a
+    -- provider on auth_error (what the blessed templates do).
+    caller_open_breaker_max_ms      = 5 * 60 * 1000,
+    -- Hard cap on provider calls in one execution, whatever the FailPlan says.
+    max_attempts_per_execution      = 32,
     discovery_cache_ttl_ms          = 60 * 1000,
     free_credit_threshold_usd       = 1.0,
 }
@@ -701,10 +707,12 @@ local function build_policy_for(profile, contract)
             contract    = contract,
         })
     end
-    return ir.compile(ir_term, {
+    local pol = ir.compile(ir_term, {
         schema  = CATALOG.field_schema,
         customs = CATALOG.customs,
     })
+    pol.caller_supplied = contract.policy_ir ~= nil
+    return pol
 end
 
 -- Filters see raw candidates (pol.plan), but prices live in the metrics
@@ -926,6 +934,7 @@ local function new_run_state(contract)
         started_at      = started_at,
         cursor          = 1,
         attempts        = 0,
+        calls           = 0,
         awaiting        = nil,   -- nil | "response" | "wait"
         pending_cand    = nil,
         call_start      = nil,
@@ -981,7 +990,10 @@ local function advance(state)
             }
             state.cursor   = state.cursor + 1
             state.attempts = 0
+        elseif state.calls >= DEFAULTS.max_attempts_per_execution then
+            break
         else
+            state.calls        = state.calls + 1
             state.pending_cand = cand
             state.call_start   = clock()
             state.awaiting     = "response"
@@ -989,18 +1001,14 @@ local function advance(state)
             -- on each retry); default policy uses mutate.identity (no change).
             local original = build_request(cand, state.contract)
             local request = state.policy.mutate(original, cand, state.ctx)
-            -- Protocol and typed payload are not sampling parameters. A caller
-            -- Xform cannot turn a selected chat route into a decisions call.
+            -- Protocol, typed payload and the admitted route (credential and
+            -- endpoint included) are not sampling parameters: no Xform, for any
+            -- protocol, may redirect the call or swap its credential.
             request.protocol = state.contract.protocol or "chat"
             request.decision = state.contract.decision
-            if request.protocol == "decisions" then
-                -- Keep the validated decision attached to the admitted route,
-                -- including its credential and endpoint, through Xforms.
-                local route = build_request(cand, state.contract)
-                for _, key in ipairs({ "provider_id", "model_family", "served_model_id",
-                    "base_url", "aws_region", "api_kind", "auth_env", "auth", "offer" }) do
-                    request[key] = route[key]
-                end
+            for _, key in ipairs({ "provider_id", "model_family", "served_model_id",
+                "base_url", "aws_region", "api_kind", "auth_env", "auth", "offer" }) do
+                request[key] = original[key]
             end
             return {
                 status       = "call",
@@ -1010,9 +1018,10 @@ local function advance(state)
         end
     end
     state.trace.total_latency_ms = clock() - state.started_at
+    local capped = state.cursor <= #ranked
     return finish(state, {
         ok    = false,
-        error = "exhausted: " .. (state.last_error_kind or "no_candidates"),
+        error = "exhausted: " .. (capped and "attempt_cap" or state.last_error_kind or "no_candidates"),
         trace = state.trace,
     })
 end
@@ -1077,9 +1086,17 @@ local function handle_response(state, response)
     -- profile's retry table to pol.sequence; IR policies carry their FailPlan).
     local action = sequence.classify(state.policy and state.policy.sequence or {}, error_kind)
     local act    = action.action or "next_candidate"
+    local open_ms = action.open_breaker_ms
+    if state.policy and state.policy.caller_supplied then
+        if type(open_ms) == "number" and open_ms > DEFAULTS.caller_open_breaker_max_ms then
+            open_ms = DEFAULTS.caller_open_breaker_max_ms
+        end
+        if act == "disable_provider" and error_kind ~= "auth_error" then act = "next_candidate" end
+    end
+    if act == "disable_provider" and CLIENT_FAULT_KINDS[error_kind] then act = "next_candidate" end
 
     if not CLIENT_FAULT_KINDS[error_kind] then
-        update_breaker_on_failure(cand.provider_id, clock(), action.open_breaker_ms)
+        update_breaker_on_failure(cand.provider_id, clock(), open_ms)
     end
 
     if act == "abort" then

@@ -67,15 +67,41 @@ t.test('pins cannot cross protocol boundaries and unknown protocols fail closed'
 end)
 
 t.test('Xforms cannot override decision protocol payload or admitted route', function()
-    reset()
-    local step = router.execute_step(nil, { protocol = 'decisions', decision = {state = 'original'},
-        policy_ir = {'policy', {'top'}, {'zero'}, {'argmax'},
-            {'seq', {'set_param', 'protocol', 'chat'}, {'set_param', 'decision', 'forged'},
-                {'set_param', 'base_url', 'https://foreign'}, {'set_param', 'served_model_id', 'chat'}},
-            {'always', {action = 'next_candidate'}}} })
-    t.eq(step.status, 'call')
-    t.eq(step.request.protocol, 'decisions')
-    t.eq(step.request.decision.state, 'original')
-    t.truthy(step.request.base_url ~= 'https://foreign')
-    t.truthy(step.request.served_model_id ~= 'chat')
+    for _, name in ipairs({'protocol', 'decision', 'base_url', 'served_model_id', 'auth_env', 'auth'}) do
+        reset()
+        local ok, err = pcall(router.execute_step, nil, { protocol = 'decisions', decision = {state = 'original'},
+            policy_ir = {'policy', {'top'}, {'zero'}, {'argmax'}, {'set_param', name, 'x'},
+                {'always', {action = 'next_candidate'}}} })
+        t.falsy(ok, name .. ' rejected at admission')
+        t.truthy(tostring(err):find('not a sampling parameter', 1, true))
+    end
+    -- even a host-blessed Xform (custom) cannot move the route, for any protocol
+    for _, contract in ipairs({ { protocol = 'decisions', decision = {state = 'original'} }, { prompt = 'hi' } }) do
+        router._test.reset()
+        assert(router.init({ providers = {
+            p = { discovery = 'static', base_url = 'https://p', api_kind = 'openai_compatible', auth_env = 'P_KEY' },
+        }, models = {
+            chat = { capabilities = {}, served_by = {{ provider = 'p' }} },
+            decision = { protocol = 'decisions', capabilities = {}, served_by = {{ provider = 'p' }} },
+        }, customs = { evil = function(req)
+            local out = {}
+            for k, v in pairs(req) do out[k] = v end
+            out.protocol, out.decision, out.base_url = 'chat', 'forged', 'https://foreign'
+            out.auth_env, out.auth, out.provider_id = 'CONTROL_PLANE_INTERNAL_SECRET', false, 'x'
+            out.offer, out.served_model_id, out.temperature = { seller_endpoint = 'https://evil' }, 'chat', 0.1
+            return out
+        end }, profiles = { default = { policy_ir = {'policy', {'top'}, {'zero'}, {'argmax'},
+            {'custom', 'evil'}, {'always', {action = 'next_candidate'}}} } } }))
+        local step = router.execute_step(nil, contract)
+        t.eq(step.status, 'call')
+        t.eq(step.request.protocol, contract.protocol or 'chat')
+        t.eq(step.request.decision and step.request.decision.state, contract.decision and 'original')
+        t.eq(step.request.base_url, 'https://p')
+        t.eq(step.request.auth_env, 'P_KEY')
+        t.eq(step.request.auth, nil)
+        t.eq(step.request.provider_id, 'p')
+        t.eq(step.request.offer, nil)
+        t.truthy(step.request.served_model_id ~= 'chat' or contract.protocol == nil)
+        t.eq(step.request.temperature, 0.1, 'sampling fields still pass through')
+    end
 end)
